@@ -1,6 +1,6 @@
 # Afterglow — East Coast Sunset Forecast
 
-A mobile-friendly, single-page web app that forecasts sunset color quality, the best viewing spots, and sky phenomena (sun dogs, halos, rainbows, rays, Belt of Venus, green flash, moon) for 42 curated, mostly west-facing spots from Maine to the Florida Gulf coast.
+A mobile-friendly, single-page web app that forecasts sunset color quality, the best viewing spots, and sky phenomena (sun dogs, halos, rainbows, rays, Belt of Venus, green flash, moon) for 55 curated, mostly west-facing spots from Maine to the Florida Gulf coast.
 
 ## Run
 
@@ -48,4 +48,4 @@ Phenomena are separate badges and are not blended into the color score.
 
 ## Sunrise | Sunset toggle
 - Opening the site shows a "Welcome to Afterglow" screen with Sunrise and Sunset buttons; the header has a persistent Sunrise | Sunset toggle (`?mode=sunrise` / `?mode=sunset`).
-- Both modes use the same 47 spots. Sunrise mode swaps in each spot's east-facing view (`window.SUNRISE_VIEW` in `spots.js`), samples clouds 40/120/200 km along the sunrise azimuth, and mirrors the timing: civil dawn → first color → best minute → sunrise → golden hour ends. The slider and "Play the morning" run across that window.
+- Both modes use the same 55 spots. Sunrise mode swaps in each spot's east-facing view (`window.SUNRISE_VIEW` in `spots.js`), samples clouds 40/120/200 km along the sunrise azimuth, and mirrors the timing: civil dawn → first color → best minute → sunrise → golden hour ends. The slider and "Play the morning" run across that window.

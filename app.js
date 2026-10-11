@@ -36,7 +36,7 @@
   });
 
   // Open-Meteo free tier: 600 weighted calls/min, 5000/hour per IP. One mode load is ~300 weighted calls
-  // (47 spots + 141 path points + AQ), so we share spot data across modes, cache longer, back off on errors,
+  // (55 spots + 165 path points + AQ), so we share spot data across modes, cache longer, back off on errors,
   // and never dead-end: stale cache -> best-match -> baked NOAA snapshot shipped with the site.
   const sleep = ms => new Promise(res => setTimeout(res, ms));
   async function fetchBatch(points, hourly, daily, base = API, models, tries = 3) {
