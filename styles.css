@@ -439,3 +439,11 @@ body.mode-sunrise .rise-only{display:block}
 .wxi.none>b{color:#7be0a0}
 .legend .lg-ic{font-style:normal;font-size:12px;margin-left:4px}
 .legend .lg-ic.tri{color:#ffd75e}
+
+/* Copyright notice — discreet but readable */
+.site-copy{margin:14px 0 0;font-size:11.5px;letter-spacing:.02em;color:var(--dim);opacity:.85}
+.home-card .site-copy{margin-top:18px;text-align:center}
+.site-foot{margin:0 22px 28px;padding:10px 4px 4px;text-align:center;border-top:1px solid var(--line)}
+.site-foot .site-copy{margin:0}
+.method .credits .site-copy{opacity:1;font-size:inherit}
+@media (max-width:720px){.site-foot{margin:0 12px 18px}}
