@@ -352,7 +352,10 @@
   }
 
   function silhouette(ctx, spot, W, H, hz, r) {
-    const k = H / 300; ctx.fillStyle = "#07060f"; ctx.strokeStyle = "#07060f";
+    const k = H / 300;
+    if (spot.far) farLayer(ctx, spot.far, W, H, hz, rng(spot.id + "far" + spot.far), k);
+    if (landFg(ctx, spot, W, H, hz, r, k)) return;
+    ctx.fillStyle = "#07060f"; ctx.strokeStyle = "#07060f";
     const t = spot.type;
     if (t === "Pier" || t === "Boardwalk") {
       const py = hz + 22 * k; ctx.fillRect(0, py, W * 0.42, 5 * k);
@@ -380,11 +383,128 @@
       } else { ctx.lineWidth = 1.2; for (let i = 0; i < 50; i++) { const x = r() * W; ctx.beginPath(); ctx.moveTo(x, H - 24 * k); ctx.lineTo(x + (r() - 0.5) * 8, H - (34 + r() * 18) * k); ctx.stroke(); } }
     }
   }
+  // ---------- Horizon features for the view direction (geography-matched, from window.SCENE) ----------
+  function farLayer(ctx, far, W, H, hz, r, k, col) {
+    ctx.save(); ctx.fillStyle = col || "rgba(10,9,22,0.92)";
+    if (far === "lowshore" || far === "islands") {
+      const segs = far === "islands" ? 4 : 1;
+      for (let s = 0; s < segs; s++) {
+        const x0 = far === "islands" ? W * (0.05 + r() * 0.85) : -10, w = far === "islands" ? W * (0.05 + r() * 0.12) : W + 20, hgt = (far === "islands" ? 4 + r() * 6 : 1.5 + r() * 2) * k;
+        ctx.beginPath(); ctx.moveTo(x0, hz + 0.5);
+        for (let x = 0; x <= w; x += 6) { const f = x / w, e = far === "islands" ? Math.sin(f * Math.PI) ** 0.6 : 1; ctx.lineTo(x0 + x, hz - hgt * e * (0.7 + 0.3 * r())); }
+        ctx.lineTo(x0 + w, hz + 0.5); ctx.fill();
+      }
+    } else if (far === "skyline") {
+      const x0 = W * (0.12 + r() * 0.2), x1 = W * (0.62 + r() * 0.3);
+      ctx.fillRect(0, hz - 1.5 * k, W, 2 * k);
+      for (let x = x0; x < x1; ) { const bw = (4 + r() * 10) * k, f = 1 - Math.abs((x - (x0 + x1) / 2) / ((x1 - x0) / 2)), bh = (6 + r() * 30 * (0.35 + f)) * k; ctx.fillRect(x, hz - bh, bw, bh + 1); if (r() < 0.12) ctx.fillRect(x + bw * 0.45, hz - bh - 6 * k, 1 * k, 6 * k); x += bw + r() * 2 * k; }
+      ctx.fillStyle = "rgba(255,214,150,0.55)"; for (let i = 0; i < 70; i++) { const x = x0 + r() * (x1 - x0), y = hz - (2 + r() * 20) * k; ctx.fillRect(x, y, 1, 1); }
+    } else if (far === "bridge") {
+      const x0 = W * (0.05 + r() * 0.15), x1 = W * (0.75 + r() * 0.22), dy = hz - 4 * k;
+      ctx.fillRect(x0, dy, x1 - x0, 1.6 * k);
+      for (let x = x0; x <= x1; x += 9 * k) ctx.fillRect(x, dy, 1 * k, hz - dy);
+      const sx = x0 + (x1 - x0) * (0.3 + r() * 0.4); ctx.beginPath(); ctx.moveTo(sx - 30 * k, dy); ctx.quadraticCurveTo(sx, dy - 14 * k, sx + 30 * k, dy); ctx.lineTo(sx + 30 * k, dy + 1.6 * k); ctx.quadraticCurveTo(sx, dy - 12 * k, sx - 30 * k, dy + 1.6 * k); ctx.fill();
+    } else if (far === "hills") {
+      ctx.beginPath(); ctx.moveTo(0, hz + 1); let y = 0; for (let x = 0; x <= W + 8; x += 8) { y = Math.max(2, Math.min(22, y + (r() - 0.45) * 5)); ctx.lineTo(x, hz - y * k); } ctx.lineTo(W, hz + 1); ctx.fill();
+    } else if (far === "trees" || far === "town") {
+      ctx.fillRect(0, hz - 3 * k, W, 4 * k);
+      for (let x = -4; x < W + 6; ) { const w = (3 + r() * 7) * k, h = (far === "town" ? 3 + r() * 6 : 5 + r() * 11) * k; if (far === "town" && r() < 0.6) { ctx.fillRect(x, hz - h, w * 1.4, h); ctx.beginPath(); ctx.moveTo(x - 1, hz - h); ctx.lineTo(x + w * 0.7, hz - h - 3 * k); ctx.lineTo(x + w * 1.4 + 1, hz - h); ctx.fill(); } else { ctx.beginPath(); ctx.ellipse(x + w / 2, hz - h * 0.6, w * 0.7, h * 0.6, 0, 0, 6.283); ctx.fill(); ctx.fillRect(x + w / 2 - 1, hz - h * 0.6, 2, h * 0.6); } x += w * (far === "town" ? 1.6 : 0.8); }
+    }
+    ctx.restore();
+  }
+  // nearby foreground for scene types that aren't water-facing: Town (roofs, poles, palms in FL) and Woods
+  function landFg(ctx, spot, W, H, hz, r, k) {
+    const t = spot.type; if (t !== "Town" && t !== "Woods") return false;
+    ctx.fillStyle = "#07060f"; ctx.strokeStyle = "#07060f";
+    if (t === "Woods") {
+      for (let x = -20; x < W + 20; ) { const h = (40 + r() * 90) * k, w = (14 + r() * 26) * k; ctx.beginPath(); ctx.moveTo(x, H); ctx.lineTo(x + w / 2, hz + 30 * k - h); ctx.lineTo(x + w, H); ctx.fill(); ctx.beginPath(); ctx.ellipse(x + w / 2, hz + 30 * k - h * 0.7, w * 0.8, h * 0.45, 0, 0, 6.283); ctx.fill(); x += w * 0.9; }
+    } else {
+      ctx.fillRect(0, hz + 6 * k, W, H);
+      for (let x = -10; x < W; ) { const w = (26 + r() * 40) * k, h = (14 + r() * 22) * k, b = hz + 14 * k; ctx.fillRect(x, b - h, w, h + H); ctx.beginPath(); ctx.moveTo(x - 3 * k, b - h); ctx.lineTo(x + w / 2, b - h - 12 * k); ctx.lineTo(x + w + 3 * k, b - h); ctx.fill(); x += w + r() * 14 * k; }
+      ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, hz - 8 * k); ctx.quadraticCurveTo(W * 0.5, hz - 2 * k, W, hz - 10 * k); ctx.stroke();
+      if (spot.state === "FL" || spot.state === "SC" || spot.state === "GA") for (const px of [W * 0.18, W * 0.74]) { const base = hz + 16 * k, top = base - 90 * k; ctx.lineWidth = 3.5 * k; ctx.beginPath(); ctx.moveTo(px, base); ctx.quadraticCurveTo(px - 8 * k, base - 45 * k, px + 3 * k, top); ctx.stroke(); ctx.lineWidth = 2.2 * k; for (let a = 0; a < 8; a++) { const ang = Math.PI * (0.85 + a * 0.19); ctx.beginPath(); ctx.moveTo(px + 3 * k, top); ctx.quadraticCurveTo(px + 3 * k + Math.cos(ang) * 22 * k, top - 14 * k, px + 3 * k + Math.cos(ang) * 38 * k, top + 12 * k); ctx.stroke(); } }
+    }
+    return true;
+  }
+
+  // ---------- 180° TURN: the sky BEHIND you (facing away from the sun) ----------
+  // Antisolar sky: Belt of Venus + Earth's shadow after sunset/before sunrise, front-lit clouds, rain shafts when
+  // forecast, and — only when the forecast rainbow odds are >= 10% inside the rainbow window with the sun up — the
+  // rainbow drawn IN the scene, centred on the antisolar point (sun elevation below the horizon), 42° radius,
+  // secondary bow at 51°. Wide-angle framing so the whole bow fits. Foreground = what's really behind you (SCENE table).
+  const BEH_TOP = [[8, [70, 120, 190]], [3, [72, 98, 160]], [0, [70, 78, 130]], [-2, [52, 56, 104]], [-4, [28, 30, 70]], [-7, [9, 11, 32]]];
+  const BEH_HOR = [[8, [196, 210, 226]], [3, [214, 196, 196]], [0, [222, 170, 178]], [-1.5, [206, 150, 178]], [-4, [70, 74, 118]], [-7, [18, 20, 44]]];
+  function drawBehind(canvas, spot, ev, t) {
+    const { sunPos } = window.Model;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const W = canvas.clientWidth || 600, H = canvas.clientHeight || 340;
+    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); }
+    const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const s = ev.s, elev = sunPos(t, spot.lat, spot.lng).elev, hz = H * 0.66, k = H / 300;
+    const B = Object.assign({ type: "Beach", far: "lowshore", water: true }, spot.behind || {});
+    const r = rng(spot.id + "behind" + (window.AG_MODE || ""));
+    // sky
+    const top = ramp(elev, BEH_TOP), hor = ramp(elev, BEH_HOR);
+    const sg = ctx.createLinearGradient(0, 0, 0, hz); sg.addColorStop(0, rgba(top)); sg.addColorStop(0.7, rgba(mix(top, hor, 0.6))); sg.addColorStop(1, rgba(hor));
+    ctx.fillStyle = sg; ctx.fillRect(0, 0, W, hz);
+    // Earth's shadow (blue-grey band rising from the horizon as the sun sinks) under the pink Belt of Venus
+    if (elev < 1 && elev > -7) {
+      const dep = clamp(-elev / 6), shH = H * (0.02 + 0.16 * dep), belt = clamp(1 - Math.abs(elev + 1.5) / 3.5);
+      const bv = ctx.createLinearGradient(0, hz - shH - H * 0.12, 0, hz - shH); bv.addColorStop(0, "rgba(255,170,190,0)"); bv.addColorStop(1, `rgba(255,170,190,${0.45 * belt})`); ctx.fillStyle = bv; ctx.fillRect(0, hz - shH - H * 0.12, W, H * 0.12);
+      const es = ctx.createLinearGradient(0, hz - shH, 0, hz); es.addColorStop(0, `rgba(60,66,110,${0.5 * belt + 0.2 * dep})`); es.addColorStop(1, `rgba(44,48,92,${0.75 * (0.4 + 0.6 * dep)})`); ctx.fillStyle = es; ctx.fillRect(0, hz - shH, W, shH);
+    }
+    // clouds: front-lit by the low sun behind the viewer
+    const lit = (dom, km) => { const e = elev + DEPRESS[dom]; return { c: ramp(e, LIGHT), a: clamp((e + 0.6) / 1.2) * clamp(1 - (ev.slotBlock || 0) * 0.8) }; };
+    const shade = ramp(elev, SHADE);
+    const layer = (frac, dom, y0, y1, n, rx, ry) => { const L = lit(dom); for (let i = 0; i < Math.round(frac * n); i++) { const y = H * (y0 + r() * (y1 - y0)), f = y / hz, x = r() * W, c = mix(shade, L.c, L.a * 0.85); blob(ctx, x, y, rx * W * (0.6 + r() * 0.8) * (1.2 - f * 0.6), ry * H * (0.6 + r() * 0.6), c, 0.55 + r() * 0.3); } };
+    layer((s.high || 0) / 100, "high", 0.04, 0.4, 26, 0.16, 0.012);
+    layer((s.mid || 0) / 100, "mid", 0.1, 0.5, 34, 0.07, 0.03);
+    layer((s.low || 0) / 100, "low", 0.38, 0.6, 30, 0.08, 0.04);
+    // weather that is forecast for the window (rain shafts / storm darkening); nothing is drawn if it isn't forecast
+    const WX = ev.wx || { items: [], bolt: {}, wind: {} }, wxOn = id => WX.items.some(x => x.id === id);
+    const bow = ev.bonus && ev.bonus.bow, bwin = bow && bow.win;
+    const bowOn = !!(bow && bow.p >= 10 && bwin && t >= bwin.start && t <= bwin.end && elev > -0.3 && elev < 42);
+    const rainy = wxOn("rain") || (s.precip || 0) > 0.1 || bowOn;
+    const fall = ((t / 30) % 1 + 1) % 1;
+    if (rainy) {
+      const cur = ctx.createLinearGradient(0, H * 0.15, 0, hz); cur.addColorStop(0, "rgba(40,44,64,0.0)"); cur.addColorStop(1, "rgba(40,44,64,0.45)"); ctx.fillStyle = cur; ctx.fillRect(0, H * 0.15, W, hz - H * 0.15);
+      ctx.strokeStyle = "rgba(205,210,230,0.22)"; ctx.lineWidth = 1; const rr = rng(spot.id + "brain");
+      for (let i = 0; i < 160; i++) { const x = rr() * W, y = (rr() + fall) % 1 * hz; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 4, y + H * 0.08); ctx.stroke(); }
+    }
+    // the rainbow, in the scene
+    if (bowOn) {
+      const fade = clamp(Math.min(t - bwin.start, bwin.end - t) / 420), a = fade * clamp(0.35 + bow.p / 60) * clamp(1 - (ev.slotBlock || 0) * 0.6);
+      const pxDeg = Math.min(H * 0.62 / 42, W * 0.47 / 42), cx = W / 2, cy = hz + Math.max(0, elev) * pxDeg, R = 42 * pxDeg, bw = R * 0.03;
+      const bands = bow.red ? [[255, 70, 40], [255, 110, 50], [255, 150, 70], [240, 170, 90]] : [[255, 40, 40], [255, 140, 30], [255, 230, 60], [70, 200, 80], [60, 120, 255], [110, 70, 210], [150, 70, 200]];
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, hz); ctx.clip();
+      const inG = ctx.createRadialGradient(cx, cy, 0, cx, cy, R - bands.length * bw); inG.addColorStop(0, "rgba(255,255,255,0)"); inG.addColorStop(0.8, `rgba(255,250,240,${0.1 * a})`); inG.addColorStop(1, `rgba(255,250,240,${0.16 * a})`); ctx.fillStyle = inG; ctx.fillRect(0, 0, W, hz);
+      ctx.fillStyle = `rgba(20,22,40,${0.12 * a})`; ctx.beginPath(); ctx.arc(cx, cy, R * 51 / 42, 0, 6.283); ctx.arc(cx, cy, R, 0, 6.283, true); ctx.fill();   // Alexander's dark band
+      ctx.globalCompositeOperation = "lighter";
+      bands.forEach((c, i) => { ctx.strokeStyle = rgba(c, a * (bow.red && i > 1 ? 0.5 : 0.75)); ctx.lineWidth = bw * 1.2; ctx.beginPath(); ctx.arc(cx, cy, R - i * bw, Math.PI, 2 * Math.PI); ctx.stroke(); });
+      if (bow.p >= 22) bands.slice().reverse().forEach((c, i) => { ctx.strokeStyle = rgba(c, a * 0.22); ctx.lineWidth = bw * 1.3; ctx.beginPath(); ctx.arc(cx, cy, R * 51 / 42 - i * bw * 1.3, Math.PI, 2 * Math.PI); ctx.stroke(); });
+      ctx.restore();
+    }
+    // lightning flash in the storm behind you, only when lightning is forecast in the window
+    const bP = (WX.bolt && WX.bolt.p) || 0;
+    if (bP >= 25) { const m = Math.floor(t / 40); if ((m * 2654435761 >>> 0) % 7 === 0) { const rb = rng(spot.id + "bb" + m); let x = W * (0.2 + rb() * 0.6), y = H * 0.12; ctx.strokeStyle = "rgba(235,235,255,0.9)"; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(x, y); while (y < hz) { x += (rb() - 0.5) * 22; y += 10 + rb() * 16; ctx.lineTo(x, Math.min(y, hz)); } ctx.stroke(); ctx.fillStyle = "rgba(200,200,255,0.08)"; ctx.fillRect(0, 0, W, hz); } }
+    // ground behind you
+    const gb = ctx.createLinearGradient(0, hz, 0, H); gb.addColorStop(0, rgba(mix(hor, [16, 14, 34], 0.55))); gb.addColorStop(1, "rgb(8,8,20)"); ctx.fillStyle = gb; ctx.fillRect(0, hz, W, H - hz);
+    if (B.water !== false) {   // water: soft reflection of the antisolar sky (and of the bow)
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.38; ctx.translate(0, 2 * hz * dpr); ctx.scale(1, -1);
+      const rh = Math.min(hz, (H - hz) * 1.6); ctx.drawImage(canvas, 0, (hz - rh) * dpr, W * dpr, rh * dpr, 0, (hz - rh) * dpr, W * dpr, rh * dpr); ctx.restore();
+      ctx.fillStyle = "rgba(8,8,22,0.35)"; ctx.fillRect(0, hz, W, H - hz);
+    }
+    farLayer(ctx, B.far, W, H, hz, r, k);
+    const fs = Object.assign({}, spot, { type: B.type, far: null, water: B.water });
+    if (!landFg(ctx, fs, W, H, hz, r, k)) silhouette(ctx, fs, W, H, hz, r);
+    const vg = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.3, W / 2, H * 0.55, Math.max(W, H) * 0.85); vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(5,3,14,0.5)"); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    return { elev, phase: phaseOf(elev, ev.timing.dom), bow: bowOn, rain: rainy, bolt: bP >= 25 };
+  }
   // same numbers the drawing uses, without drawing (used by the photoreal stage for its captions)
   function state(spot, ev, t) {
     const elev = window.Model.sunPos(t, spot.lat, spot.lng).elev, lightIn = clamp(1 - ev.slotBlock * 1.05);
     const layerLight = dom => { const e = elev + DEPRESS[dom]; return { c: ramp(e, LIGHT), lit: clamp((e + 0.6) / 1.2) * lightIn }; };
     return { elev, phase: phaseOf(elev, ev.timing.dom), lit: { high: layerLight("high"), mid: layerLight("mid"), low: layerLight("low") } };
   }
-  g.Preview = { draw, phaseOf, state };
+  g.Preview = { draw, phaseOf, state, drawBehind };
 })(window);

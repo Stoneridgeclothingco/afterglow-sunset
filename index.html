@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="styles.css?v=22">
+<link rel="stylesheet" href="styles.css?v=23">
 </head>
 <body>
 <script>
@@ -38,9 +38,10 @@
     <div class="logo"><span class="sun"></span></div>
     <div><h1>Afterglow</h1><p id="tagline">East Coast sunset forecast · Maine to the Gulf</p></div>
   </div>
-  <div class="top-ctl"><div class="mode-toggle" role="group" aria-label="Sunrise or sunset"><a id="tg-rise" href="?mode=sunrise">🌅 Sunrise</a><a id="tg-set" href="?mode=sunset">🌇 Sunset</a></div><button id="nearme" class="pill">📍 Near me</button></div>
+  <div class="top-ctl"><div class="mode-toggle" role="group" aria-label="Sunrise or sunset"><a id="tg-rise" href="?mode=sunrise">🌅 Sunrise</a><a id="tg-set" href="?mode=sunset">🌇 Sunset</a></div><button id="archive-btn" class="pill" title="Past predictions for days that have already happened">🗂 Archive</button><button id="nearme" class="pill">📍 Near me</button></div>
 </header>
 <nav id="days" class="days" aria-label="Choose day"></nav>
+<div id="archbar" class="archbar" hidden></div>
 
 <main class="layout">
   <section class="mapwrap">
@@ -101,17 +102,23 @@
   <div id="detail-body" class="detail-body"></div>
 </aside>
 
+<div id="arch-scrim" class="arch-scrim"></div>
+<aside id="archive" class="archive" aria-label="Archive of past predictions">
+  <div class="arch-head"><div><h2>🗂 Archive</h2><p>Past predictions · days already gone</p></div><button id="archive-close" class="close" aria-label="Close">✕</button></div>
+  <div id="arch-body" class="arch-body"></div>
+</aside>
+
 <footer class="site-foot"><p class="site-copy">© Sean Tuttle 2026 · Afterglow</p></footer>
 
 <div id="loading" class="loading"><div class="ld-sun"></div><p>Reading the sky…</p></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="spots.js?v=22"></script>
-<script src="model.js?v=22"></script>
-<script src="preview.js?v=22"></script>
-<script src="photoreal.js?v=22"></script>
-<script src="photostage.js?v=22"></script>
-<script src="satellite.js?v=22"></script>
+<script src="spots.js?v=23"></script>
+<script src="model.js?v=23"></script>
+<script src="preview.js?v=23"></script>
+<script src="photoreal.js?v=23"></script>
+<script src="photostage.js?v=23"></script>
+<script src="satellite.js?v=23"></script>
 <script>
   (function () {
     var m = new URLSearchParams(location.search).get("mode"); if (m !== "sunrise" && m !== "sunset") return;
@@ -127,6 +134,6 @@
     }
   })();
 </script>
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>
