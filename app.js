@@ -402,7 +402,7 @@
         ${chip(DIRW + " gap", Math.round((1 - ev.slotBlock) * 100) + "% open", ev.slotBlock < 0.25 ? "light gets in" : ev.slotBlock < 0.55 ? "partly blocked" : "mostly blocked", P.path)}
         ${chip("Air", hazeTxt, s.aod != null ? "AOD " + s.aod.toFixed(2) : "RH " + Math.round(ev.rhLow) + "%", P.aod)}
       </div>
-      <div class="fine pv-fine">This is an illustrated preview generated from this spot's forecast, not a photo. Cloud cover by layer comes from NOAA HRRR (with the low-cloud gap along the ${EV} line), haze from NOAA GOES-19 AOD / CAMS, and the lighting follows the actual sun position. Drag the slider or hit Play to watch the colors change through ${RISE ? "blue hour, first color, sunrise and golden hour" : "golden hour, sunset, afterglow and blue hour"}.</div>
+      <div class="fine pv-fine">This is an illustrated preview generated from this spot's forecast, not a photo. Cloud cover by layer comes from NOAA HRRR (with the low-cloud gap along the ${EV} line), haze from NOAA GOES-19 AOD / CAMS, and the lighting follows the actual sun position. Drag the slider or hit Play to watch the colors change through ${RISE ? "blue hour, first color, sunrise and golden hour" : "golden hour, sunset, afterglow and blue hour"}. Weather is drawn only when the forecast calls for it during the ${EV} window: rain (slanted by the wind), ⚡ storm cell and lightning (odds ≥ 25%), whitecaps (wind ≥ 15 mph), fog and snow. Rainbows form opposite the sun — behind you — so when rainbow odds are ≥ 10% a 🌈 “behind you” panel appears during the forecast rainbow window.</div>
       ${noaaPanel(r)}`;
   }
 
