@@ -202,8 +202,31 @@
     const nb = list.filter(r => r.ev.bonus.bow.p >= BONUS_MIN).length, nd = list.filter(r => r.ev.bonus.dog.p >= BONUS_MIN).length;
     box.innerHTML = `<div class="bonus-h">✨ Special bonus · ${state.day === 0 ? (RISE ? "this morning" : "tonight") : state.day === 1 ? (RISE ? "tomorrow morning" : "tomorrow night") : fmtDay(list[0].ev.tSet, list[0].tz, state.day)}<small>${nb} spot${nb === 1 ? "" : "s"} with rainbow odds · ${nd} with sun dogs</small></div>
       ${bonusCard(bw.ev.bonus.bow, bw, { spot: true, short: true, kicker: "Best rainbow odds" })}
-      ${bonusCard(dg.ev.bonus.dog, dg, { spot: true, short: true, kicker: "Best sun-dog odds" })}`;
-    box.querySelectorAll(".bcard[data-id]").forEach(el => el.addEventListener("click", () => openDetail(el.dataset.id)));
+      ${bonusCard(dg.ev.bonus.dog, dg, { spot: true, short: true, kicker: "Best sun-dog odds" })}
+      ${(() => { const tri = list.filter(r => r.ev.tri.on); if (tri.length) return tri.slice(0, 3).map(r => trifectaCard(r, { spot: true })).join("");
+        const c = list.slice().sort((a, b) => (b.ev.tri.n - a.ev.tri.n) || ((b.ev.score / EP.color + b.ev.tri.bow / EP.bow + b.ev.tri.bolt / EP.bolt) - (a.ev.score / EP.color + a.ev.tri.bow / EP.bow + a.ev.tri.bolt / EP.bolt)))[0];
+        return trifectaCard(c, { spot: true }); })()}`;
+    box.querySelectorAll(".bcard[data-id],.tricard[data-id]").forEach(el => el.addEventListener("click", () => openDetail(el.dataset.id)));
+  }
+
+  // ---------- Weather during the event + Trifecta ----------
+  // Little icons under each map pin: 🌈 rainbow odds ≥ 10% (bold at ≥ 22%), ⚡ lightning odds ≥ 25% in the event window,
+  // then rain / wind / fog / overcast / snow if forecast during the window.
+  function pinIcons(r) {
+    const B = r.ev.bonus, out = [];
+    if (B.bow.p >= BONUS_MIN) out.push({ i: "🌈", c: "bow " + bonusCls(B.bow.p), t: `Rainbow ${B.bow.p}%` });
+    r.ev.wx.items.forEach(w => out.push({ i: w.icon, c: w.id + (w.id === "bolt" && w.p >= 40 ? " hi" : ""), t: w.name }));
+    return out.slice(0, 3);
+  }
+  const wxChip = w => `<span class="tag wx ${w.id}">${w.icon} ${w.name}${w.p ? " " + w.p + "%" : ""}</span>`;
+  const EP = window.Model.EPIC;
+  const legTxt = T => `${T.legs.color ? "✓" : "✗"} ${Ev} ${T.color}/${EP.color} · ${T.legs.bow ? "✓" : "✗"} Rainbow ${T.bow}%/${EP.bow}% · ${T.legs.bolt ? "✓" : "✗"} Lightning ${T.bolt}%/${EP.bolt}%`;
+  function trifectaCard(r, opts = {}) {
+    const T = r.ev.tri;
+    if (T.on) return `<div class="tricard on"${opts.spot ? ` data-id="${r.spot.id}"` : ""}><div class="tri-ic">✦</div><div><div class="tri-k">Trifecta${opts.spot ? ` · ${r.spot.name}, ${r.spot.state}` : ""}</div>
+      <div class="tri-n">Epic ${EV} + epic rainbow + epic lightning</div><div class="tri-w">${hm(T.start, r.tz)}–${hm(T.end, r.tz)} · ${legTxt(T)}</div></div><div class="tri-badge">🌅🌈⚡</div></div>`;
+    return `<div class="tricard"${opts.spot ? ` data-id="${r.spot.id}"` : ""}><div class="tri-ic off">✦</div><div><div class="tri-k">Trifecta watch${opts.spot ? ` · closest: ${r.spot.name}, ${r.spot.state}` : ""}</div>
+      <div class="tri-n">${T.n}/3 epic${T.n === 3 && !T.lined ? " — but rainbow & lightning don't overlap in time" : ""}</div><div class="tri-w">${legTxt(T)}</div></div></div>`;
   }
 
   // ---------- Map ----------
@@ -229,14 +252,16 @@
   function renderMarkers() {
     state.results.forEach(r => {
       const lb = label(r.ev.score);
-      const B = r.ev.bonus, bx = (B.bow.p >= 22 ? `<em class="pb bow">🌈</em>` : "") + (B.dog.p >= 22 ? `<em class="pb dog">◉</em>` : "");
-      const html = `<div class="pin" style="--c:${lb.c}"><span>${r.ev.score}</span>${bx}</div>`;
+      const B = r.ev.bonus, T = r.ev.tri, ic = pinIcons(r);
+      const bx = B.dog.p >= 22 ? `<em class="pb dog">◉</em>` : "";
+      const html = `<div class="pin${T.on ? " tri" : ""}" style="--c:${lb.c}"><span>${r.ev.score}</span>${bx}${T.on ? `<em class="ptri" title="Trifecta">✦</em>` : ""}${ic.length ? `<div class="pwx">${ic.map(x => `<i class="${x.c}" title="${x.t}">${x.i}</i>`).join("")}</div>` : ""}</div>`;
       const icon = L.divIcon({ className: "pin-wrap", html, iconSize: [30, 30], iconAnchor: [15, 15] });
       if (markers[r.spot.id]) markers[r.spot.id].setIcon(icon);
       else markers[r.spot.id] = L.marker([r.spot.lat, r.spot.lng], { icon, riseOnHover: true }).addTo(map)
         .on("click", () => openDetail(r.spot.id))
         .bindTooltip("", { direction: "top", offset: [0, -16], className: "tip" });
-      markers[r.spot.id].setTooltipContent(`<b>${r.spot.name}</b><br>${lb.t} · ${fmtTime(r.ev.tSet, r.tz)}${r.ev.bonus.bow.p >= BONUS_MIN ? `<br>🌈 ${r.ev.bonus.bow.name} ${r.ev.bonus.bow.p}%` : ""}${r.ev.bonus.dog.p >= BONUS_MIN ? `<br>◉ Sun dogs ${r.ev.bonus.dog.p}%` : ""}`);
+      markers[r.spot.id].setTooltipContent(`<b>${r.spot.name}</b><br>${lb.t} · ${fmtTime(r.ev.tSet, r.tz)}${r.ev.bonus.bow.p >= BONUS_MIN ? `<br>🌈 ${r.ev.bonus.bow.name} ${r.ev.bonus.bow.p}%` : ""}${r.ev.bonus.dog.p >= BONUS_MIN ? `<br>◉ Sun dogs ${r.ev.bonus.dog.p}%` : ""}${r.ev.wx.items.map(w => `<br>${w.icon} ${w.name}${w.p ? " " + w.p + "%" : ""}`).join("")}${r.ev.tri.on ? `<br><b class="tt-tri">✦ TRIFECTA</b>` : ""}`);
+      if (markers[r.spot.id].setZIndexOffset) markers[r.spot.id].setZIndexOffset(r.ev.tri.on ? 1000 : ic.length ? 200 : 0);
     });
   }
 
@@ -278,7 +303,9 @@
     $("#list").innerHTML = list.map((r, k) => {
       const lb = label(r.ev.score);
       const B = r.ev.bonus, btag = [B.bow, B.dog].filter(b => b.p >= BONUS_MIN).map(b => `<span class="tag bonus ${b.id} ${bonusCls(b.p)}">${b.icon} ${b.name} ${b.p}%</span>`);
-      const tags = btag.concat(r.ev.badges.filter(b => b.p >= 22 && b.id !== "bow" && b.id !== "dog").sort((a, b) => b.p - a.p).slice(0, 3 - btag.length).map(b => `<span class="tag ${b.id}">${b.icon} ${b.name.toLowerCase()} ${likely(b.p).toLowerCase()}</span>`));
+      if (r.ev.tri.on) btag.unshift(`<span class="tag tri">✦ Trifecta</span>`);
+      r.ev.wx.items.slice(0, 2).forEach(w => btag.push(wxChip(w)));
+      const tags = btag.concat(r.ev.badges.filter(b => b.p >= 22 && b.id !== "bow" && b.id !== "dog").sort((a, b) => b.p - a.p).slice(0, Math.max(0, 4 - btag.length)).map(b => `<span class="tag ${b.id}">${b.icon} ${b.name.toLowerCase()} ${likely(b.p).toLowerCase()}</span>`));
       return `<li class="item" data-id="${r.spot.id}" style="--c:${lb.c};animation-delay:${k * 18}ms">
         <div class="rank">${k + 1}</div>
         <div class="meta"><div class="nm">${r.spot.name} <span class="st">${r.spot.state}</span></div>
@@ -499,6 +526,9 @@
         <div class="d-sub">Sky score <b>${ev.sky}</b> · Site fit <b>${ev.site}</b></div>
         <div class="conf ${conf.c}">${conf.t}</div></div>
       </div>
+      ${ev.tri.on || ev.tri.n >= 2 ? trifectaCard(r) : ""}
+      <h3>🌦️ Weather during ${EV} <small>${hm(ev.wx.win.start, r.tz)}–${hm(ev.wx.win.end, r.tz)}</small></h3>
+      <div class="wxd">${ev.wx.items.length ? ev.wx.items.map(w => `<div class="wxi ${w.id}"><b>${w.icon}</b><div><div class="wn">${w.name}${w.p ? ` <em>${w.p}%</em>` : ""}</div><div class="wt">${w.txt}${w.id === "bolt" && w.win ? ` Strikes most likely ${hm(w.win.start, r.tz)}–${hm(w.win.end, r.tz)}.` : ""}</div></div></div>`).join("") : `<div class="wxi none"><b>✓</b><div><div class="wn">No rain, wind, lightning or fog</div><div class="wt">Lightning ${ev.wx.bolt.p}% · wind ${ev.wx.wind.mph} mph (gusts ${ev.wx.wind.gust}) · rain chance ${ev.wx.rain.pp}%</div></div></div>`}</div>
       <h3>✨ Special bonus <small>rainbow & sun-dog odds for this spot</small></h3>
       <div class="bonus-d">${bonusCard(ev.bonus.bow, r, { kicker: ev.bonus.bow.red ? "Red rainbow (low sun)" : "Rainbow odds" })}${bonusCard(ev.bonus.dog, r, { kicker: "Sun-dog odds" })}</div>
       ${ev.gates.length ? `<div class="gates">${ev.gates.map(g => `<div>⚠ ${g}</div>`).join("")}</div>` : ""}

@@ -182,8 +182,28 @@
       const rim = L.low.lit * near(p.x);
       if (rim > 0.08) { ctx.strokeStyle = rgba(L.low.c, 0.7 * rim); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.ellipse(p.x, p.y, p.rx, p.ry, 0, Math.PI * 1.08, Math.PI * 1.92); ctx.stroke(); }
     }
-    // rain shafts
-    if ((s.precip || 0) > 0.1 || (s.pprob || 0) > 50) { ctx.strokeStyle = rgba(mix(shade, [200, 200, 220], 0.4), 0.2); ctx.lineWidth = 1; for (const p of G.rain) { ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - 6, p.y + H * 0.25); ctx.stroke(); } }
+    // weather during the event window (from the forecast): rain slanted by wind, storm cell + lightning, whitecaps
+    const WX = ev.wx || { items: [], bolt: { p: 0 }, wind: { mph: s.wind || 0 } };
+    const wxOn = id => WX.items.some(x => x.id === id);
+    const windMph = Math.max(WX.wind.mph || 0, s.wind || 0), slant = -6 - clamp(windMph / 30) * 34;
+    const boltP = WX.bolt.p || 0, bw = WX.bolt.win, boltNear = boltP >= 25 && (!bw || (t >= bw.start - 1800 && t <= bw.end + 1800));
+    if (boltNear) {   // dark storm cell on the side away from the sun's glow
+      const cx = W * 0.14, top = H * 0.08, cell = mix(shade, [34, 32, 52], 0.6);
+      blob(ctx, cx, hz - H * 0.22, W * 0.2, H * 0.2, cell, 0.95); blob(ctx, cx + W * 0.08, top + H * 0.07, W * 0.24, H * 0.06, cell, 0.85); blob(ctx, cx - W * 0.04, hz - H * 0.36, W * 0.13, H * 0.13, cell, 0.9);
+      ctx.strokeStyle = rgba(cell, 0.35); ctx.lineWidth = 1.2; for (let i = 0; i < 26; i++) { const x = cx - W * 0.14 + i * W * 0.011; ctx.beginPath(); ctx.moveTo(x, hz - H * 0.1); ctx.lineTo(x + slant * 0.6, hz); ctx.stroke(); }
+    }
+    if ((s.precip || 0) > 0.1 || (s.pprob || 0) > 50 || wxOn("rain")) { ctx.strokeStyle = rgba(mix(shade, [200, 200, 220], 0.4), wxOn("rain") ? 0.3 : 0.2); ctx.lineWidth = 1; for (const p of G.rain) { ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + slant, p.y + H * 0.25); ctx.stroke(); } }
+    if (boltNear) {   // lightning: flickers as the time slider / Play moves (deterministic per minute)
+      const m = Math.floor(t / 60), hsh = ((m * 2654435761) >>> 0) % 7, strong = boltP >= 40 ? hsh !== 3 : hsh % 3 === 0;
+      if (strong) {
+        const rb = rng(spot.id + "bolt" + (m % 5)); let x = W * (0.1 + rb() * 0.1), y = hz - H * 0.3; const pts = [[x, y]];
+        while (y < hz - 2) { y += H * (0.03 + rb() * 0.04); x += (rb() - 0.5) * W * 0.04; pts.push([x, Math.min(y, hz - 2)]); }
+        ctx.save(); ctx.globalCompositeOperation = "lighter";
+        const fl = ctx.createRadialGradient(pts[0][0], pts[0][1], 2, pts[0][0], pts[0][1], W * 0.3); fl.addColorStop(0, "rgba(200,190,255,0.35)"); fl.addColorStop(1, "rgba(200,190,255,0)"); ctx.fillStyle = fl; ctx.fillRect(0, 0, W, hz);
+        for (const [lw, a] of [[6, 0.15], [3, 0.35], [1.4, 0.95]]) { ctx.strokeStyle = `rgba(235,230,255,${a})`; ctx.lineWidth = lw; ctx.beginPath(); pts.forEach(([px, py], i) => i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)); ctx.stroke(); }
+        ctx.restore();
+      }
+    }
     // haze veil at the horizon
     if (haze > 0.02) { const hzG = ctx.createLinearGradient(0, hz - H * 0.3, 0, hz); hzG.addColorStop(0, "rgba(220,200,190,0)"); hzG.addColorStop(1, rgba(mix([220, 200, 190], hor, 0.5), haze)); ctx.fillStyle = hzG; ctx.fillRect(0, 0, W, hz); }
 
@@ -204,6 +224,10 @@
         ctx.fillStyle = rgba(ramp(elev, LIGHT), gl * 0.6 * (1 - d * 0.6)); ctx.fillRect(sunX - w / 2 + rp.j * 30 * d, yy, w, 1.4);
         ctx.fillStyle = `rgba(0,0,10,${0.12 + 0.1 * d})`; ctx.fillRect((rp.w * 1.7 % 1) * W - 40, yy + 3, 80 + rp.j * 60, 1.2);
       }
+    }
+    if (spot.water !== false && windMph >= 15) {   // whitecaps on windy water
+      const rw = rng(spot.id + "caps"), n = Math.round(clamp((windMph - 12) / 20) * 60) + 10;
+      ctx.fillStyle = "rgba(230,235,245,0.35)"; for (let i = 0; i < n; i++) { const d = rw(), yy = hz + 4 + d * d * (H - hz - 6); ctx.fillRect(rw() * W, yy, (3 + rw() * 10) * (0.4 + d * 1.6), 1.2); }
     }
     silhouette(ctx, spot, W, H, hz, rng(spot.id + "fg"));
     // vignette

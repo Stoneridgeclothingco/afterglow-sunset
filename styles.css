@@ -405,3 +405,37 @@ body.mode-sunrise .rise-only{display:block}
 .bc-win span{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}.bc-win b{font-size:13px}
 .bcard .bc-p{grid-column:3;grid-row:1}
 .tag{white-space:nowrap}
+/* ---- v17: weather icons under pins + Trifecta ---- */
+.pin .pwx{position:absolute;top:31px;left:50%;transform:translateX(-50%);display:flex;gap:1px;padding:1px 3px;border-radius:999px;background:rgba(13,10,26,.82);box-shadow:0 1px 4px rgba(0,0,0,.5);white-space:nowrap;pointer-events:none}
+.pin .pwx i{font-style:normal;font-size:11px;line-height:13px;filter:drop-shadow(0 0 1px rgba(0,0,0,.6))}
+.pin .pwx i.bow.lo{opacity:.7}
+.pin .pwx i.bow.md,.pin .pwx i.bow.hi{font-size:13px}
+.pin .pwx i.bolt{color:#ffe14d}.pin .pwx i.bolt.hi{font-size:13px;animation:boltfl 2.4s infinite}
+@keyframes boltfl{0%,86%,100%{opacity:1}88%{opacity:.25}90%{opacity:1}92%{opacity:.4}}
+.pin.tri{box-shadow:0 0 0 3px #ffd75e,0 0 0 6px rgba(13,10,26,.8),0 0 26px #ffd75e;animation:tripulse 2s ease-in-out infinite}
+@keyframes tripulse{50%{box-shadow:0 0 0 3px #fff2b0,0 0 0 6px rgba(13,10,26,.8),0 0 38px #ffd75e}}
+.pin .ptri{position:absolute;font-style:normal;top:-12px;left:50%;transform:translateX(-50%);font-size:14px;color:#ffd75e;text-shadow:0 0 6px #ffb300,0 1px 2px #000}
+.tt-tri{color:#ffd75e}
+.tag.wx{background:rgba(255,255,255,.08);color:#dfe6ff}
+.tag.wx.bolt{background:rgba(255,225,77,.18);color:#ffe98a}
+.tag.wx.rain{color:#a8d4ff}.tag.wx.wind{color:#cfe8e0}
+.tag.tri{background:linear-gradient(90deg,#ffd75e,#ff9ad5,#9fd4ff);color:#160f24;font-weight:800}
+.tricard{display:grid;grid-template-columns:40px 1fr auto;gap:10px;align-items:center;padding:12px 14px;border-radius:14px;border:1px dashed var(--line);background:rgba(255,255,255,.03);margin:6px 0}
+.tricard[data-id]{cursor:pointer}
+.tricard .tri-ic{font-size:26px;color:#ffd75e;text-align:center;text-shadow:0 0 10px #ffb300}
+.tricard .tri-ic.off{color:#6f7590;text-shadow:none}
+.tricard .tri-k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#ffd7b0}
+.tricard .tri-n{font-weight:700;margin:2px 0}
+.tricard .tri-w{font-size:11.5px;color:var(--mute)}
+.tricard .tri-badge{font-size:20px}
+.tricard.on{border:1px solid #ffd75e;background:radial-gradient(circle at 0 0,rgba(255,215,94,.25),transparent 60%),radial-gradient(circle at 100% 100%,rgba(255,120,200,.18),transparent 60%),rgba(255,255,255,.05);box-shadow:0 0 24px rgba(255,215,94,.25)}
+.tricard.on .tri-n{color:#ffe9a8}
+.wxd{display:grid;gap:6px;margin:6px 0 10px}
+.wxi{display:grid;grid-template-columns:30px 1fr;gap:8px;align-items:center;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid var(--line)}
+.wxi>b{font-size:20px;text-align:center}
+.wxi .wn{font-weight:700;font-size:13px}.wxi .wn em{font-style:normal;color:#ffe98a}
+.wxi .wt{font-size:12px;color:var(--mute)}
+.wxi.bolt{border-color:rgba(255,225,77,.45)}
+.wxi.none>b{color:#7be0a0}
+.legend .lg-ic{font-style:normal;font-size:12px;margin-left:4px}
+.legend .lg-ic.tri{color:#ffd75e}

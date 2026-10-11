@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="styles.css?v=16">
+<link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
 <script>
@@ -51,7 +51,7 @@
       <button data-overlay="radar">Radar</button>
     </div>
     <div id="overlay-note" class="overlay-note"></div>
-    <div class="legend"><span style="--c:#6f7590">Poor</span><span style="--c:#c9a46a">Fair</span><span style="--c:#ffb347">Good</span><span style="--c:#ff7a3d">Great</span><span style="--c:#ff4f9a">Epic</span></div>
+    <div class="legend"><span style="--c:#6f7590">Poor</span><span style="--c:#c9a46a">Fair</span><span style="--c:#ffb347">Good</span><span style="--c:#ff7a3d">Great</span><span style="--c:#ff4f9a">Epic</span><em class="lg-ic" title="Rainbow odds ≥ 10%">🌈</em><em class="lg-ic" title="Lightning odds ≥ 25%">⚡</em><em class="lg-ic tri" title="Trifecta: Epic color ≥85 + rainbow ≥40% + lightning ≥40%, lined up">✦</em></div>
   </section>
   <aside class="side">
     <div id="hero" class="hero"></div>
@@ -84,6 +84,8 @@
     <div><h4>Sunset score (0–100)</h4><p>Built from Open-Meteo forecast cloud layers at sunset. High and mid cloud (20–70%) is the "canvas" that lights up. Low cloud ~80 km toward the sunset blocks the light, so it's penalized heavily. Rain, haze and low visibility mute color; clearing after rain gets a bonus.</p></div>
     <div><h4>Sun dogs</h4><p>Need ice-crystal cloud (cirrus/cirrostratus) near the sun, a visible sun, and a low sun angle. We scan the 3 hours before sunset using high-cloud cover at the spot and toward the sun. The index is a likelihood guide, not a calibrated probability.</p></div>
     <div><h4>Rainbows</h4><p>Need sunlight from the west hitting showers to the east, with the sun under 42°. We check rain and shower codes ~25 km opposite the sun, plus whether the sunset horizon is open. Hourly models are coarse for showers, so treat this as a heads-up.</p></div>
+    <div><h4>Weather icons</h4><p>Map pins, list rows and the spot page show the weather forecast for the event window (90 min before → 30 min after sunset; 30 min before → 90 min after sunrise): ⚡ lightning when thunderstorm odds reach 25% (from NOAA thunderstorm codes at the spot or ~12 km away, else instability/CAPE × rain chance), 🌧️ rain ≥ 0.2 mm/h or rain codes, 🌦️ ≥ 50% rain chance, 💨 wind ≥ 15 mph or gusts ≥ 25, 🌫️ fog, ☁️ overcast ≥ 90%, ❄️ snow. 🌈 marks rainbow odds ≥ 10% (bold at ≥ 22%).</p></div>
+    <div><h4>✦ Trifecta</h4><p>The rarest call: at the same spot and the same window, an <b>Epic</b> color score (≥ 85), <b>epic rainbow</b> odds (≥ 40%, "High") and <b>epic lightning</b> odds (≥ 40%, "High"), with the rainbow window and the lightning window overlapping (within 30 min) inside the event window. Physically it means storms on the side opposite the sun while the sun side stays open.</p></div>
     <div><h4>NOAA data</h4><p>Cloud layers, visibility, humidity and rain at sunset come from NOAA's HRRR model (3 km, read directly from NOAA grib2 for tonight and tomorrow) and NOAA GFS beyond 48 h. Tonight is cross-checked against GOES-19 Level-2 observations (cloud mask, cloud-top height, cloud phase, aerosol optical depth), HRRR-Smoke and nearby METARs. Every metric is tagged NOAA obs / NOAA model / Estimate / Fallback.</p></div>
     <div><h4>Honest limits</h4><p>Forecast skill drops fast after ~2 days. GOES sees cloud tops only, and AOD only in clear daytime pixels. Cloud genus is still partly inferred. PM2.5 and AOD beyond tonight come from CAMS (non-NOAA, labelled Fallback). The spot preview is an illustration generated from the forecast numbers, not a photo.</p></div>
   </div>
@@ -100,12 +102,12 @@
 <div id="loading" class="loading"><div class="ld-sun"></div><p>Reading the sky…</p></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="spots.js?v=16"></script>
-<script src="model.js?v=16"></script>
-<script src="preview.js?v=16"></script>
-<script src="photoreal.js?v=16"></script>
-<script src="photostage.js?v=16"></script>
-<script src="satellite.js?v=16"></script>
+<script src="spots.js?v=17"></script>
+<script src="model.js?v=17"></script>
+<script src="preview.js?v=17"></script>
+<script src="photoreal.js?v=17"></script>
+<script src="photostage.js?v=17"></script>
+<script src="satellite.js?v=17"></script>
 <script>
   (function () {
     var m = new URLSearchParams(location.search).get("mode"); if (m !== "sunrise" && m !== "sunset") return;
@@ -121,6 +123,6 @@
     }
   })();
 </script>
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>

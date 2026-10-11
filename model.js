@@ -276,9 +276,53 @@
       if (RISE) st = Math.max(st, tSet); else en = Math.min(en, tSet);
       bowWin = { start: st, end: en, min: Math.max(15, Math.round((en - st) / 60 / 5) * 5) };
     }
+    const P100 = x => Math.round(clamp(x) * 100), P100w = P100;
+    // ---- Weather DURING the event window (icons on map/list/detail + preview) & lightning odds ----
+    // Window: sunset = 90 min before → 30 min after; sunrise = 30 min before → 90 min after (golden hour + glow).
+    const WX0 = RISE ? tSet - 30 * 60 : tSet - 90 * 60, WX1 = RISE ? tSet + 90 * 60 : tSet + 30 * 60;
+    const isThunder = c => c === 95 || c === 96 || c === 99, isSnow = c => (c >= 71 && c <= 77) || c === 85 || c === 86, isFog = c => c === 45 || c === 48;
+    const wxSer = [];
+    for (let t = WX0; t <= WX1; t += 900) {
+      const sc = atCode(h, t), ec = atCode(e, t), cape = at(h, "cape", t) || 0, pp = (at(h, "precipitation_probability", t) || 0) / 100, epp = (at(e, "precipitation_probability", t) || 0) / 100;
+      const pr = at(h, "precipitation", t) || 0, ep = at(e, "precipitation", t) || 0, wp = at(W, "precipitation", t) || 0;
+      // lightning odds: thunderstorm code at the spot (0.70+) or ~12 km on the rainbow side (0.60+), else convective potential (CAPE × rain chance)
+      const capeF = pw(cape, [[0, 0], [300, 0], [600, 0.1], [1000, 0.25], [2000, 0.5], [3000, 0.65]]);
+      const conv = capeF * clamp(Math.max(pp, epp) * 1.1) * (isShowery(sc) || isShowery(ec) ? 1 : 0.6);
+      const lp = clamp(Math.max(isThunder(sc) ? 0.7 + 0.25 * capeF : 0, isThunder(ec) ? 0.6 + 0.25 * capeF : 0, conv), 0, 0.95);
+      wxSer.push({ t, sc, ec, lp, where: isThunder(sc) ? "at the spot" : isThunder(ec) ? `~12 km ${RISE ? "west" : "east"}` : "nearby (unstable air)",
+        pr, ep, wp, pp, wind: at(h, "wind_speed_10m", t) || 0, gust: at(h, "wind_gusts_10m", t) || 0, wdir: at(h, "wind_direction_10m", t),
+        low: at(h, "cloud_cover_low", t) || 0, tot: at(h, "cloud_cover", t) || 0, vis: at(h, "visibility", t) });
+    }
+    const mx = k => wxSer.reduce((a, x) => Math.max(a, x[k] || 0), 0);
+    const bolt = wxSer.reduce((a, x) => x.lp > a.lp ? x : a, { lp: 0, t: null, where: "" });
+    let boltWin = null;
+    if (bolt.t && bolt.lp >= 0.1) { const thr = Math.max(0.1, bolt.lp * 0.5), on = wxSer.filter(x => x.lp >= thr); boltWin = { start: on[0].t - 450, end: on[on.length - 1].t + 450 }; }
+    const rainMm = mx("pr"), rainPp = mx("pp"), anyCode = f => wxSer.some(x => f(x.sc)), windMx = mx("wind"), gustMx = mx("gust"), lowMx = mx("low"), totMx = mx("tot");
+    const visMin = wxSer.reduce((a, x) => x.vis != null ? Math.min(a, x.vis) : a, 1e9);
+    const wx = { win: { start: WX0, end: WX1 }, items: [] };
+    const boltP = P100w(bolt.lp);
+    if (boltP >= 25) wx.items.push({ id: "bolt", icon: "⚡", name: boltP >= 40 ? "Lightning likely" : "Lightning possible", p: boltP, t: bolt.t, win: boltWin, txt: `Thunderstorms ${bolt.where} — ${boltP}% lightning odds in the ${EV} window.` });
+    if (anyCode(isSnow)) wx.items.push({ id: "snow", icon: "❄️", name: "Snow", txt: `Snow in the forecast during ${EV}.` });
+    else if (rainMm >= 0.2 || anyCode(c => isRain(c) || isShowery(c))) wx.items.push({ id: "rain", icon: "🌧️", name: anyCode(c => c >= 51 && c <= 57) && rainMm < 0.5 ? "Drizzle" : rainMm >= 2.5 ? "Heavy rain" : "Rain", mm: +rainMm.toFixed(1), pp: Math.round(rainPp * 100), txt: `Rain at the spot during ${EV}: up to ${rainMm.toFixed(1)} mm/h (${Math.round(rainPp * 100)}% chance).` });
+    else if (rainPp >= 0.5) wx.items.push({ id: "rain", icon: "🌦️", name: "Showers possible", pp: Math.round(rainPp * 100), txt: `${Math.round(rainPp * 100)}% chance of rain during ${EV}.` });
+    if (windMx >= 15 || gustMx >= 25) wx.items.push({ id: "wind", icon: "💨", name: windMx >= 25 || gustMx >= 40 ? "Very windy" : "Windy", mph: Math.round(windMx), gust: Math.round(gustMx), txt: `Wind up to ${Math.round(windMx)} mph, gusts ${Math.round(gustMx)} mph${s.wdir != null ? ` from the ${["N", "NE", "E", "SE", "S", "SW", "W", "NW"][Math.round(s.wdir / 45) % 8]}` : ""}.` });
+    if (anyCode(isFog) || visMin < 1000) wx.items.push({ id: "fog", icon: "🌫️", name: "Fog", txt: `Fog / visibility down to ${visMin < 1e8 ? (visMin / 1609).toFixed(1) + " mi" : "low"} during ${EV}.` });
+    else if (totMx >= 90 || lowMx >= 80) wx.items.push({ id: "cloud", icon: "☁️", name: "Overcast", txt: `${Math.round(Math.max(totMx, lowMx))}% cloud overhead during ${EV} — sky may stay grey.` });
+    wx.bolt = { p: boltP, t: bolt.t, win: boltWin, where: bolt.where };
+    wx.wind = { mph: Math.round(windMx), gust: Math.round(gustMx), dir: s.wdir };
+    wx.rain = { mm: +rainMm.toFixed(1), pp: Math.round(rainPp * 100) };
+    // ---- TRIFECTA: epic color + epic rainbow + epic lightning lined up in the same window ----
+    const EP = EPIC;
+    const bowP = P100w(bow.p);
+    const legs = { color: score >= EP.color, bow: bowP >= EP.bow, bolt: boltP >= EP.bolt };
+    // the rainbow window and the lightning window must overlap (±30 min) inside the event window
+    const bw0 = bowWin ? Math.max(bowWin.start, WX0) : null, bw1 = bowWin ? Math.min(bowWin.end, WX1) : null;
+    const lined = !!(bowWin && boltWin && bw0 < bw1 && boltWin.start <= bw1 + 1800 && boltWin.end >= bw0 - 1800);
+    const nLegs = +legs.color + legs.bow + legs.bolt;
+    const tri = { on: nLegs === 3 && lined, n: nLegs, legs, lined, color: score, bow: bowP, bolt: boltP,
+      start: lined ? Math.max(bw0, boltWin.start) : null, end: lined ? Math.min(bw1, boltWin.end) : null };
     // ---- BONUS cards (sun dogs / rainbows): explicit odds % + data-driven why (Metric Bible §6/§7) ----
-    const P100 = x => Math.round(clamp(x) * 100);
-    const SUNSIDE = RISE ? "east" : "west", ANTI = RISE ? "west" : "east";
+        const SUNSIDE = RISE ? "east" : "west", ANTI = RISE ? "west" : "east";
     const bonus = {
       dog: { id: "dog", name: "Sun dogs", icon: "◉", p: P100(dog.p), t: dog.t,
         why: dog.p >= 0.03 ? `Sun dogs ${P100(dog.p)}% — ${Math.round((dog.cir || 0) * 100)}% thin cirrus/ice cloud with the sun at ${dog.elev.toFixed(0)}° and ${Math.round((dog.sunVis || 0) * 100)}% sun-disk visibility. Look ~22° left & right of the sun.`
@@ -307,7 +351,7 @@
     else if (Math.abs(age - 14.77) <= 1.6) badges.push({ id: "moon", name: "Full moon rise", p: 80, t: tSet, icon: "🌕", why: `Moon ${age < 14.77 ? "rises shortly before" : "rises shortly after"} sunset, opposite the sun.` });
     else if (age >= 1.2 && age <= 4.5) badges.push({ id: "moon", name: "Crescent moon", p: 60, t: tSet + 20 * 60, icon: "🌒", why: "Thin crescent low in the west in the afterglow." });
 
-    return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, bonus, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
+    return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, bonus, wx, tri, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
       clouds: cloudTypes(s), sunsetAz: az, canvasCover, slotBlock, clean, rhLow, dewDep, dP6, dP24, dDew, fropaH, front, timing,
       siteInfo: { inArc, off, alignQ, obst: sp.obst, water: sp.water, surface, arc: sp.arc }, season, screen };
   }
@@ -320,7 +364,9 @@
     if (score >= 30) return { t: "Fair", c: "#c9a46a" };
     return { t: "Poor", c: "#6f7590" };
   }
+  // "Epic" thresholds for the Trifecta (all three must line up at the same spot & window)
+  const EPIC = { color: 85, bow: 40, bolt: 40 };
   const likely = p => p >= 40 ? "High" : p >= 22 ? "Moderate" : p >= 10 ? "Low" : "Unlikely";
 
-  g.Model = { sunPos, offset, evaluate, label, likely, clamp, timeAtElev };
+  g.Model = { sunPos, offset, evaluate, label, likely, clamp, timeAtElev, EPIC };
 })(window);
