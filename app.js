@@ -35,7 +35,11 @@
     sp.az = az; sp.west = offset(sp.lat, sp.lng, az, 80); sp.path = [40, 120, 200].map(km => offset(sp.lat, sp.lng, az, km)); sp.east = offset(sp.lat, sp.lng, (az + 180) % 360, 12);
   });
 
-  async function fetchBatch(points, hourly, daily, base = API, models) {
+  // Open-Meteo free tier: 600 weighted calls/min, 5000/hour per IP. One mode load is ~300 weighted calls
+  // (47 spots + 141 path points + AQ), so we share spot data across modes, cache longer, back off on errors,
+  // and never dead-end: stale cache -> best-match -> baked NOAA snapshot shipped with the site.
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+  async function fetchBatch(points, hourly, daily, base = API, models, tries = 3) {
     const p = new URLSearchParams({
       latitude: points.map(x => x.lat).join(","), longitude: points.map(x => x.lng).join(","),
       hourly, timezone: "auto", timeformat: "unixtime", forecast_days: "7",
@@ -44,36 +48,67 @@
     if (daily) p.set("daily", daily);
     if (models) p.set("models", models);
     if (base !== API) ["temperature_unit", "wind_speed_unit", "precipitation_unit"].forEach(k => p.delete(k));
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const r = await fetch(`${base}?${p}`);
-      if (r.ok) { const j = await r.json(); return Array.isArray(j) ? j : [j]; }
-      await new Promise(res => setTimeout(res, 800 * (attempt + 1)));
+    let last = null;
+    for (let attempt = 0; attempt < tries; attempt++) {
+      try {
+        const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 12000);   // Open-Meteo sometimes never answers
+        try {
+          const r = await fetch(`${base}?${p}`, { signal: ctl.signal });
+          if (r.ok) { const j = await r.json(); return Array.isArray(j) ? j : [j]; }
+          last = new Error("Open-Meteo HTTP " + r.status); last.status = r.status;
+          if (r.status === 429) break;                     // rate-limited: retrying only burns more quota
+        } finally { clearTimeout(to); }
+      } catch (e) { last = e; }                            // network / CORS-less 429 / timeout
+      if (attempt < tries - 1) await sleep(1200 * (attempt + 1));
     }
-    throw new Error("Open-Meteo request failed");
+    throw last || new Error("Open-Meteo request failed");
   }
+  const lsGet = k => { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { try { Object.keys(localStorage).filter(x => x.startsWith("afterglow-v")).forEach(x => localStorage.removeItem(x)); localStorage.setItem(k, JSON.stringify(v)); } catch (e2) {} } };
+  const FRESH = 45 * 60 * 1000, STALE_OK = 12 * 3600 * 1000;
 
   async function loadData() {
     // Cache is keyed to the exact spot list: adding/reordering spots must never reuse old index-aligned arrays.
-    const sig = SPOTS.map(s => s.id).join("|");
-    Object.keys(localStorage).filter(k => k.startsWith("afterglow-v") && k !== "afterglow-v14-sunset" && k !== "afterglow-v14-sunrise").forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
-    const key = "afterglow-v14-" + MODE;
-    let cached = null; try { cached = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) {}
-    if (cached && cached.sig === sig && cached.S && cached.S.length === SPOTS.length && cached.W && cached.W.length === SPOTS.length * 3 && cached.E && cached.E.length === SPOTS.length && Date.now() - cached.at < 30 * 60 * 1000) return cached;
+    const sig = SPOTS.map(s => s.id).join("|"), n = SPOTS.length;
+    const BK = "afterglow-v15-base", DK = "afterglow-v15-" + MODE;
+    Object.keys(localStorage).filter(k => k.startsWith("afterglow-v") && !k.startsWith("afterglow-v15-")).forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+    const okB = c => c && c.sig === sig && c.S && c.S.length === n;
+    const okD = c => c && c.sig === sig && c.W && c.W.length === n * 3 && c.E && c.E.length === n;
+    let B = lsGet(BK), D = lsGet(DK);
+    const fresh = c => c && Date.now() - c.at < FRESH;
+    const join = (b, dd, extra) => Object.assign({ at: Math.min(b.at, dd.at), sig, S: b.S, AQ: b.AQ, fcModel: b.fcModel, W: dd.W, E: dd.E }, extra || {});
+    if (okB(B) && okD(D) && fresh(B) && fresh(D)) return join(B, D);
     // Primary: NOAA HRRR (0–48 h, 3 km) blended into NOAA GFS (days 3–7) — Open-Meteo "gfs_seamless" mirror of NOAA NOMADS output.
-    // Fallback (clearly labelled): Open-Meteo best-match, which may use non-NOAA models.
-    const get = models => Promise.all([
-      fetchBatch(SPOTS, SPOT_VARS, "sunset,sunrise", API, models),
-      fetchBatch(SPOTS.flatMap(s => s.path), WEST_VARS, null, API, models),
-      fetchBatch(SPOTS.map(s => s.east), EAST_VARS, null, API, models),
-    ]);
-    let S, W, E, fcModel = "noaa";
-    try { [S, W, E] = await get("gfs_seamless"); } catch (e) { console.warn("NOAA HRRR/GFS mirror failed, using fallback", e); [S, W, E] = await get(null); fcModel = "fallback"; }
-    // Air quality (aerosol optical depth, PM2.5) — optional; score falls back to visibility only
-    let AQ = null;
-    try { AQ = await fetchBatch(SPOTS, "aerosol_optical_depth,pm2_5,dust", null, "https://air-quality-api.open-meteo.com/v1/air-quality"); } catch (e) { console.warn("AQ unavailable", e); }
-    const d = { at: Date.now(), sig, S, W, E, AQ, fcModel };
-    try { localStorage.setItem(key, JSON.stringify(d)); } catch (e) {}
-    return d;
+    const getB = async models => {
+      const S = await fetchBatch(SPOTS, SPOT_VARS, "sunset,sunrise", API, models);
+      let AQ = null; try { AQ = await fetchBatch(SPOTS, "aerosol_optical_depth,pm2_5,dust", null, "https://air-quality-api.open-meteo.com/v1/air-quality", null, 1); } catch (e) { console.warn("AQ unavailable", e); }
+      return { at: Date.now(), sig, S, AQ, fcModel: models ? "noaa" : "fallback" };
+    };
+    const getD = async models => { const [W, E] = await Promise.all([fetchBatch(SPOTS.flatMap(s => s.path), WEST_VARS, null, API, models), fetchBatch(SPOTS.map(s => s.east), EAST_VARS, null, API, models)]); return { at: Date.now(), sig, W, E }; };
+    const tryLive = async models => {
+      const [b, dd] = await Promise.all([okB(B) && fresh(B) ? B : getB(models), okD(D) && fresh(D) ? D : getD(models)]);
+      if (b !== B) lsSet(BK, b); if (dd !== D) lsSet(DK, dd);
+      return join(b, dd);
+    };
+    let err;
+    // Live budget: if Open-Meteo hasn't answered in 10 s, show cached/snapshot data now; the live fetch keeps going and refreshes the cache.
+    const live = tryLive("gfs_seamless");
+    try { return await Promise.race([live, sleep(10000).then(() => { const e = new Error("Open-Meteo too slow"); e.slow = true; throw e; })]); }
+    catch (e) { err = e; console.warn("NOAA HRRR/GFS mirror failed/slow", e); live.catch(() => {}); }
+    // 1) recent cache (even if past the 45-min refresh window)
+    if (okB(B) && okD(D) && Date.now() - Math.min(B.at, D.at) < STALE_OK) return join(B, D, { stale: true });
+    // 2) Open-Meteo best-match (skip if we were rate-limited — it hits the same quota)
+    if (!(err && (err.status === 429 || err.slow))) { try { return Object.assign(await tryLive(null), {}); } catch (e) { console.warn("best-match fallback failed", e); } }
+    // 3) NOAA snapshot baked into the site at deploy time
+    try {
+      const v = Math.floor(Date.now() / 600000);
+      const [sb, sd] = await Promise.all(["base", MODE].map(x => fetch(`data/snap-${x}.json?_=${v}`).then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })));
+      if (okB(sb) && okD(sd)) return join(sb, sd, { snapshot: true });
+      console.warn("snapshot does not match spot list");
+    } catch (e) { console.warn("snapshot unavailable", e); }
+    // 4) any cache at all
+    if (okB(B) && okD(D)) return join(B, D, { stale: true });
+    throw err;
   }
 
 
@@ -554,10 +589,11 @@
     update();
     $("#loading").classList.add("done");
     $("#updated").innerHTML = "Forecast updated " + new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(new Date(d.at)) +
+      (d.snapshot ? ` · <span class="src fb">Snapshot</span> live forecast busy — showing NOAA data saved ${fmtClock(new Date(d.at).toISOString())}` : d.stale ? ` · <span class="src fb">Cached</span> live forecast busy — using last download` : "") +
       (d.fcModel === "fallback" ? ` · <span class="src fb">Fallback</span> NOAA mirror unreachable — Open-Meteo best-match` : ` · <span class="src model">NOAA model</span> HRRR→GFS`) +
       (N ? ` · <span class="src obs">NOAA obs</span> GOES-19 L2 ${N.goes && N.goes.products.ACM ? fmtClock(N.goes.products.ACM.scan_utc) : "n/a"}${N.hrrr ? `, HRRR ${new Date(N.hrrr.cycle_utc).toISOString().slice(11, 13)}Z direct` : ""}${N.metar ? `, METAR` : ""}` : ` · <span class="src fb">NOAA direct feed offline</span>`);
   }).catch(err => {
     console.error(err);
-    $("#loading").innerHTML = `<div class="err">Couldn't reach the forecast service (Open-Meteo). Check your connection and reload.</div>`;
+    $("#loading").innerHTML = `<div class="err">Couldn't reach the forecast service (Open-Meteo). Check your connection and <a href="#" onclick="location.reload();return false">tap to retry</a>.</div>`;
   });
 })();
