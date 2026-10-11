@@ -45,3 +45,7 @@ Phenomena are separate badges and are not blended into the color score.
 - View arcs and obstruction angles are hand-estimated. No DEM is used.
 - Smoke aloft is a proxy (AOD vs surface PM2.5). HRRR-Smoke is not integrated.
 - Forecast data is cached in localStorage for 30 min.
+
+## Sunrise | Sunset toggle
+- Opening the site shows a "Welcome to Afterglow" screen with Sunrise and Sunset buttons; the header has a persistent Sunrise | Sunset toggle (`?mode=sunrise` / `?mode=sunset`).
+- Both modes use the same 47 spots. Sunrise mode swaps in each spot's east-facing view (`window.SUNRISE_VIEW` in `spots.js`), samples clouds 40/120/200 km along the sunrise azimuth, and mirrors the timing: civil dawn → first color → best minute → sunrise → golden hour ends. The slider and "Play the morning" run across that window.

@@ -86,6 +86,15 @@
     for (let m = 0; m <= maxMin; m++) { if (sunPos(t0 - m * 60, lat, lng).elev >= el) return t0 - m * 60; }
     return null;
   }
+  // sunrise-mode helpers: search forward for sun climbing to el, backward for sun below el
+  function timeAfterRising(t0, lat, lng, el, maxMin = 240) {
+    for (let m = 0; m <= maxMin; m++) { if (sunPos(t0 + m * 60, lat, lng).elev >= el) return t0 + m * 60; }
+    return null;
+  }
+  function timeBeforeBelow(t0, lat, lng, el, maxMin = 120) {
+    for (let m = 0; m <= maxMin; m++) { if (sunPos(t0 - m * 60, lat, lng).elev <= el) return t0 - m * 60; }
+    return null;
+  }
   // Moon age in days (0 = new, ~14.77 = full)
   const moonAge = t => { const syn = 29.530588853, ref = 947182440; return (((t - ref) / 86400) % syn + syn) % syn; };
   const angDiff = (a, b) => { let d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
@@ -93,7 +102,8 @@
   // Evaluate one spot for one day (Sunset Metric Bible v1 §0–§13).
   // S = spot forecast, Wl = [W40, W120, W200] forecasts along the sunset azimuth, E = antisolar point (~12 km), AQ = air quality
   function evaluate(sp, S, Wl, E, di, AQ) {
-    const tSet = S.daily.sunset[di], h = S.hourly, e = E.hourly, lat = sp.lat, lng = sp.lng;
+    const RISE = g.AG_MODE === "sunrise", EV = RISE ? "sunrise" : "sunset", DIR = RISE ? "Eastern" : "Western", dir = RISE ? "eastern" : "western";
+    const tSet = S.daily[EV][di], h = S.hourly, e = E.hourly, lat = sp.lat, lng = sp.lng;
     const W = Wl[0].hourly; // nearest western point (kept for legacy fields)
     const path = Wl.map((w, k) => ({ km: [40, 120, 200][k], low: at(w.hourly, "cloud_cover_low", tSet), mid: at(w.hourly, "cloud_cover_mid", tSet), high: at(w.hourly, "cloud_cover_high", tSet), precip: at(w.hourly, "precipitation", tSet) }));
     const aqh = AQ && AQ.hourly;
@@ -113,14 +123,15 @@
     const hi = s.high / 100, md = s.mid / 100, lo = s.low / 100;
 
     // ---- §1 timing ----
-    const golden = timeBeforeAtElev(tSet, lat, lng, 6);
-    const civilEnd = timeAtElev(tSet, lat, lng, -6, 120);
+    // sunrise mirrors sunset in time: twilight/afterglow come BEFORE the event, golden hour AFTER
+    const golden = RISE ? timeAfterRising(tSet, lat, lng, 6) : timeBeforeAtElev(tSet, lat, lng, 6);
+    const civilEnd = RISE ? timeBeforeBelow(tSet, lat, lng, -6, 120) : timeAtElev(tSet, lat, lng, -6, 120);
     const dom = hi >= 0.2 ? "high" : md >= 0.2 ? "mid" : lo >= 0.2 ? "low" : "clear";
     const hKm = { high: 9, mid: 4, low: 1, clear: 0 }[dom];
     const peakMin = { high: 12, mid: 6, low: 2, clear: 5 }[dom];
     const depress = hKm ? Math.sqrt(2 * hKm / 6371) * DEG + 0.5 : 6; // §1.4 depression angle at which cloud stops being lit
-    const glowEnd = timeAtElev(tSet, lat, lng, -depress, 120) || tSet + 20 * 60;
-    const timing = { golden, sunset: tSet, peak: tSet + peakMin * 60, glowEnd, civilEnd, dom, twilightMin: civilEnd ? Math.round((civilEnd - tSet) / 60) : null };
+    const glowEnd = RISE ? (timeBeforeBelow(tSet, lat, lng, -depress, 120) || tSet - 20 * 60) : (timeAtElev(tSet, lat, lng, -depress, 120) || tSet + 20 * 60);
+    const timing = { rise: RISE, golden, sunset: tSet, peak: tSet + (RISE ? -1 : 1) * peakMin * 60, glowEnd, civilEnd, dom, twilightMin: civilEnd ? Math.round(Math.abs(civilEnd - tSet) / 60) : null };
 
     // ---- §2.4 western clear slot (low + ½ mid along the sun azimuth, 40/120/200 km) ----
     const blockAt = p => clamp((p.low + 0.5 * p.mid) / 100);
@@ -169,7 +180,7 @@
     }
 
     const comp = [
-      { k: "Western clear slot", w: 25, q: slotQ },
+      { k: DIR + " clear slot", w: 25, q: slotQ },
       { k: "High/mid cloud screen", w: 25, q: screenEff },
       { k: "Clean low-level air", w: 20, q: clean },
       { k: "Post-front / pressure", w: 10, q: syn },
@@ -186,9 +197,9 @@
     const gates = [];
     if (hi + md < 0.1) { sky = Math.min(sky, 55); gates.push("Clear sky: capped at 55 — pretty gradient, nothing to paint."); }
     if (s.vis != null && s.vis < 4830) { sky = Math.min(sky, 45); gates.push("Visibility under ~3 mi: capped at Fair."); }
-    if (pathLow >= 90 || Math.max(path[0].low, path[1].low) >= 95) { sky = Math.min(sky, 20); gates.push("Low overcast along the sunset path (out to ~200 km): light can't reach the clouds — Poor."); }
-    if ((s.precip || 0) >= 0.2 || [45, 48].includes(s.code)) { sky = Math.min(sky, 20); gates.push(`${[45, 48].includes(s.code) ? "Fog" : "Rain"} at the spot at sunset — Poor for color (rainbow scored separately).`); }
-    if (s.total >= 95 && slotBlock >= 0.85) { sky = Math.min(sky, 20); gates.push("Full overcast with no western gap — Poor."); }
+    if (pathLow >= 90 || Math.max(path[0].low, path[1].low) >= 95) { sky = Math.min(sky, 20); gates.push(`Low overcast along the ${EV} path (out to ~200 km): light can't reach the clouds — Poor.`); }
+    if ((s.precip || 0) >= 0.2 || [45, 48].includes(s.code)) { sky = Math.min(sky, 20); gates.push(`${[45, 48].includes(s.code) ? "Fog" : "Rain"} at the spot at ${EV} — Poor for color (rainbow scored separately).`); }
+    if (s.total >= 95 && slotBlock >= 0.85) { sky = Math.min(sky, 20); gates.push(`Full overcast with no ${dir} gap — Poor.`); }
     sky = Math.round(clamp(sky, 0, 100));
 
     // ---- §9 site fit ----
@@ -205,9 +216,9 @@
 
     // ---- reasons ----
     const R = [];
-    if (slotBlock < 0.25) R.push("Western light path is open — sunlight can reach the clouds.");
-    else if (slotBlock < 0.55) R.push(`Partial western gap (${Math.round(slotBlock * 100)}% blocked along the sunset line).`);
-    else R.push(`Western light path mostly blocked (${Math.round(slotBlock * 100)}%) by low/mid cloud — biggest risk.`);
+    if (slotBlock < 0.25) R.push(`${DIR} light path is open — sunlight can reach the clouds.`);
+    else if (slotBlock < 0.55) R.push(`Partial ${dir} gap (${Math.round(slotBlock * 100)}% blocked along the ${EV} line).`);
+    else R.push(`${DIR} light path mostly blocked (${Math.round(slotBlock * 100)}%) by low/mid cloud — biggest risk.`);
     if (hi + md < 0.1) R.push("Almost no high or mid cloud — clean gradient but no canvas.");
     else if (screen > 0.75) R.push(`Good screen: ${Math.round(s.high)}% high, ${Math.round(s.mid)}% mid cloud${dom === "high" ? " (cirrus-level, glows longest)" : ""}.`);
     else if (hi > 0.85 && md > 0.6) R.push("Thick, layered deck overhead — tends to go grey unless the sun slips under it.");
@@ -218,12 +229,12 @@
     if (front) R.push(`Post-frontal air: drier air arrived ~${fropaH} h ago and pressure is up ${dP24.toFixed(1)} hPa in 24 h — often the week's best setup.`);
     else if (dP6 > 1) R.push(`Pressure rising (+${dP6.toFixed(1)} hPa/6h) — clearing tendency.`);
     if (smokeNote) R.push(smokeNote);
-    if (!inArc) R.push(`Tonight's sunset azimuth (${Math.round(az)}°) is ${Math.round(off)}° outside this spot's open view — seasonal mismatch.`);
+    if (!inArc) R.push(`${RISE ? "This sunrise" : "Tonight's sunset"} azimuth (${Math.round(az)}°) is ${Math.round(off)}° outside this spot's open view — seasonal mismatch.`);
 
     // ---- §6/§7/§8 wow badges ----
     let dog = { p: 0, t: null }, bow = { p: 0, t: null }, halo = { p: 0 };
     for (let k = 0; k <= 16; k++) {
-      const t = tSet - 4 * 3600 + k * 900;
+      const t = RISE ? tSet + k * 900 : tSet - 4 * 3600 + k * 900;
       const pos = sunPos(t, lat, lng); if (pos.elev < 0.3) continue;
       const H = at(h, "cloud_cover_high", t) / 100, Hw = at(Wl[0].hourly, "cloud_cover_high", t) / 100;
       const L = at(h, "cloud_cover_low", t) / 100, M = at(h, "cloud_cover_mid", t) / 100;
@@ -248,7 +259,7 @@
         const clearW = pw(Math.max(WL, WM * 0.8), [[0, 1], [0.3, 0.8], [0.6, 0.25], [0.9, 0]]);
         const dry = pr > 1 ? 0.2 : pr > 0.3 ? 0.6 : 1;
         const pb = 0.6 * rainEast * conv * clearW * dry;
-        if (pb > bow.p) bow = { p: pb, t, elev: pos.elev, red: t >= tSet - 15 * 60 };
+        if (pb > bow.p) bow = { p: pb, t, elev: pos.elev, red: RISE ? t <= tSet + 15 * 60 : t >= tSet - 15 * 60 };
       }
     }
     const wLoBlock = slotBlock;
@@ -256,14 +267,18 @@
     const badges = [
       { id: "dog", name: "Sun dogs", p: pct(dog.p), t: dog.t, icon: "◉", why: dog.p >= 0.1 ? "Thin cirrus with a visible low sun — look ~22° left and right of the sun." : "Needs thin cirrus/cirrostratus with the sun visible below ~25°." },
       { id: "halo", name: "22° halo", p: pct(halo.p), t: halo.t, icon: "◯", why: "Ring 22° around the sun from cirrostratus; near sunset only partial arcs show." },
-      { id: "bow", name: bow.red ? "Red rainbow" : "Rainbow", p: pct(bow.p), t: bow.t, icon: "🌈", why: bow.p >= 0.1 ? `Showers east while the sun shines from the west — look east (antisolar point).${bow.red ? " Near sunset the bow turns red/orange." : ""}` : "Needs showers to the east, a clear western sky, and a dry viewer." },
-      { id: "pillar", name: "Sun pillar", p: pct(0.4 * pw(hi, [[0, 0], [0.15, 0.4], [0.4, 1], [0.8, 0.7], [1, 0.4]]) * (1 - wLoBlock) * (s.temp < 40 ? 1.3 : 1)), t: tSet + 3 * 60, icon: "┃", why: "Vertical light column from plate crystals as the sun touches/just passes the horizon." },
-      { id: "rays", name: "Crepuscular rays", p: pct(0.7 * pw((path[0].low + path[0].mid * 0.5) / 100, [[0, 0], [0.2, 0.4], [0.35, 1], [0.65, 1], [0.85, 0.2]]) * (s.aod != null ? pw(s.aod, [[0, 0.5], [0.1, 1], [0.3, 1], [0.6, 0.5]]) : 0.8)), t: tSet - 10 * 60, icon: "☀", why: "Broken cloud on the western horizon plus a little haze casts visible shafts." },
-      { id: "venus", name: "Belt of Venus", p: pct(0.8 * (1 - clamp(((s.eLow || 0) + (s.eMid || 0) * 0.6) / 100)) * clean * (1 - hi * 0.6)), t: tSet + 10 * 60, icon: "▬", why: "Pink band above Earth's blue shadow in the EAST, ~5–20 min after sunset. Needs a clear eastern sky." },
-      { id: "flash", name: "Green flash", p: pct(sp.water && sp.obst <= 0.5 && inArc ? 0.35 * (1 - clamp(slotBlock * 3)) * (aodQ ?? 0.7) * (1 - lo) : 0), t: tSet, icon: "●", why: "Needs a flat water horizon, clean air and zero cloud at the horizon. Watch the very last sliver of sun." },
+      { id: "bow", name: bow.red ? "Red rainbow" : "Rainbow", p: pct(bow.p), t: bow.t, icon: "🌈", why: RISE ? (bow.p >= 0.1 ? `Showers west while the sun shines from the east — look west (antisolar point).${bow.red ? " Right after sunrise the bow is red/orange." : ""}` : "Needs showers to the west, a clear eastern sky, and a dry viewer.") : bow.p >= 0.1 ? `Showers east while the sun shines from the west — look east (antisolar point).${bow.red ? " Near sunset the bow turns red/orange." : ""}` : "Needs showers to the east, a clear western sky, and a dry viewer." },
+      { id: "pillar", name: "Sun pillar", p: pct(0.4 * pw(hi, [[0, 0], [0.15, 0.4], [0.4, 1], [0.8, 0.7], [1, 0.4]]) * (1 - wLoBlock) * (s.temp < 40 ? 1.3 : 1)), t: tSet + (RISE ? -3 : 3) * 60, icon: "┃", why: "Vertical light column from plate crystals as the sun nears/just clears the horizon." },
+      { id: "rays", name: "Crepuscular rays", p: pct(0.7 * pw((path[0].low + path[0].mid * 0.5) / 100, [[0, 0], [0.2, 0.4], [0.35, 1], [0.65, 1], [0.85, 0.2]]) * (s.aod != null ? pw(s.aod, [[0, 0.5], [0.1, 1], [0.3, 1], [0.6, 0.5]]) : 0.8)), t: tSet + (RISE ? 10 : -10) * 60, icon: "☀", why: `Broken cloud on the ${dir} horizon plus a little haze casts visible shafts.` },
+      { id: "venus", name: "Belt of Venus", p: pct(0.8 * (1 - clamp(((s.eLow || 0) + (s.eMid || 0) * 0.6) / 100)) * clean * (1 - hi * 0.6)), t: tSet + (RISE ? -10 : 10) * 60, icon: "▬", why: RISE ? "Pink band above Earth's blue shadow in the WEST, ~5–20 min before sunrise. Needs a clear western sky." : "Pink band above Earth's blue shadow in the EAST, ~5–20 min after sunset. Needs a clear eastern sky." },
+      { id: "flash", name: "Green flash", p: pct(sp.water && sp.obst <= 0.5 && inArc ? 0.35 * (1 - clamp(slotBlock * 3)) * (aodQ ?? 0.7) * (1 - lo) : 0), t: tSet, icon: "●", why: `Needs a flat water horizon, clean air and zero cloud at the horizon. ${RISE ? "Watch the very first sliver of sun." : "Watch the very last sliver of sun."}` },
     ];
     const age = moonAge(tSet);
-    if (Math.abs(age - 14.77) <= 1.6) badges.push({ id: "moon", name: "Full moon rise", p: 80, t: tSet, icon: "🌕", why: `Moon ${age < 14.77 ? "rises shortly before" : "rises shortly after"} sunset, opposite the sun.` });
+    if (RISE) {
+      if (Math.abs(age - 14.77) <= 1.6) badges.push({ id: "moon", name: "Full moon set", p: 80, t: tSet, icon: "🌕", why: "Moon sets in the west near sunrise, opposite the sun." });
+      else if (age >= 25 && age <= 28.3) badges.push({ id: "moon", name: "Crescent moon", p: 60, t: tSet - 20 * 60, icon: "🌘", why: "Thin waning crescent low in the east in the dawn glow." });
+    }
+    else if (Math.abs(age - 14.77) <= 1.6) badges.push({ id: "moon", name: "Full moon rise", p: 80, t: tSet, icon: "🌕", why: `Moon ${age < 14.77 ? "rises shortly before" : "rises shortly after"} sunset, opposite the sun.` });
     else if (age >= 1.2 && age <= 4.5) badges.push({ id: "moon", name: "Crescent moon", p: 60, t: tSet + 20 * 60, icon: "🌒", why: "Thin crescent low in the west in the afterglow." });
 
     return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
