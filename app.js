@@ -179,6 +179,33 @@
   const confidence = i => i === 0 ? { t: "Higher confidence", c: "hi" } : i <= 2 ? { t: "Moderate confidence", c: "md" } : { t: "Low confidence (day " + (i + 1) + ")", c: "lo" };
   const dist = (a, b) => { const R = 3958.8, dLat = (b.lat - a.lat) * Math.PI / 180, dLng = (b.lng - a.lng) * Math.PI / 180; const x = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
 
+  // ---------- Bonus: rainbows & sun dogs ----------
+  const BONUS_MIN = 10;   // below this the odds are "near zero" → greyed / hidden
+  const bonusCls = p => p >= 40 ? "hi" : p >= 22 ? "md" : p >= BONUS_MIN ? "lo" : "no";
+  const bonusWord = p => p >= BONUS_MIN ? likely(p) : "Near zero";
+  const durTxt = m => m >= 60 ? (m / 60).toFixed(m % 60 ? 1 : 0).replace(/\.0$/, "") + " h" : m + " min";
+  const hm = (t, tz) => fmtTime(t, tz).replace(/ [A-Z]{2,4}$/, "");
+  function bonusCard(b, r, opts = {}) {
+    const c = bonusCls(b.p), when = b.p >= BONUS_MIN && b.t ? fmtTime(b.t, r.tz) : null;
+    return `<div class="bcard ${b.id} ${c}${b.red ? " red" : ""}"${opts.spot ? ` data-id="${r.spot.id}"` : ""}>
+      <div class="bc-ic">${b.icon}</div>
+      <div class="bc-main"><div class="bc-k">${opts.kicker || "Bonus"}</div><div class="bc-n">${b.name}${opts.spot ? ` <small>· ${r.spot.name}, ${r.spot.state}</small>` : ""}</div>
+      <div class="bc-why">${opts.short ? (b.p >= BONUS_MIN ? (b.win ? `Starts ${hm(b.win.start, r.tz)} · lasts ~${durTxt(b.win.min)} · look ${b.look.split(",")[0]}` : `Look ${b.look}${when ? " ~" + when : ""}`) : (b.id === "bow" ? `Too little rain opposite the sun — rainbow odds near zero everywhere` : "Not enough thin ice cloud near a low sun — sun-dog odds near zero everywhere")) : b.why + (when ? ` <em>Best ~${when}</em>` : "")}</div></div>
+      ${!opts.short && b.win && b.p >= BONUS_MIN ? `<div class="bc-win"><div><span>Starts</span><b>${hm(b.win.start, r.tz)}</b></div><div><span>Lasts</span><b>~${durTxt(b.win.min)}</b></div><div><span>Ends</span><b>${hm(b.win.end, r.tz)}</b></div><div><span>Look</span><b>${b.look.split(",")[0]}</b></div></div>` : ""}
+      <div class="bc-p"><b>${b.p}%</b><span>${bonusWord(b.p)}</span></div>
+      <div class="bc-bar"><i style="width:${Math.max(2, b.p)}%"></i></div></div>`;
+  }
+  function renderBonus(list) {
+    const box = $("#bonus"); if (!box) return;
+    const best = id => list.slice().sort((a, b) => b.ev.bonus[id].p - a.ev.bonus[id].p)[0];
+    const bw = best("bow"), dg = best("dog"); if (!bw) { box.innerHTML = ""; return; }
+    const nb = list.filter(r => r.ev.bonus.bow.p >= BONUS_MIN).length, nd = list.filter(r => r.ev.bonus.dog.p >= BONUS_MIN).length;
+    box.innerHTML = `<div class="bonus-h">✨ Special bonus · ${state.day === 0 ? (RISE ? "this morning" : "tonight") : state.day === 1 ? (RISE ? "tomorrow morning" : "tomorrow night") : fmtDay(list[0].ev.tSet, list[0].tz, state.day)}<small>${nb} spot${nb === 1 ? "" : "s"} with rainbow odds · ${nd} with sun dogs</small></div>
+      ${bonusCard(bw.ev.bonus.bow, bw, { spot: true, short: true, kicker: "Best rainbow odds" })}
+      ${bonusCard(dg.ev.bonus.dog, dg, { spot: true, short: true, kicker: "Best sun-dog odds" })}`;
+    box.querySelectorAll(".bcard[data-id]").forEach(el => el.addEventListener("click", () => openDetail(el.dataset.id)));
+  }
+
   // ---------- Map ----------
   const map = L.map("map", { zoomControl: false, attributionControl: true, minZoom: 4 }).setView([34.5, -77.5], 5);
   L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -202,13 +229,14 @@
   function renderMarkers() {
     state.results.forEach(r => {
       const lb = label(r.ev.score);
-      const html = `<div class="pin" style="--c:${lb.c}"><span>${r.ev.score}</span></div>`;
+      const B = r.ev.bonus, bx = (B.bow.p >= 22 ? `<em class="pb bow">🌈</em>` : "") + (B.dog.p >= 22 ? `<em class="pb dog">◉</em>` : "");
+      const html = `<div class="pin" style="--c:${lb.c}"><span>${r.ev.score}</span>${bx}</div>`;
       const icon = L.divIcon({ className: "pin-wrap", html, iconSize: [30, 30], iconAnchor: [15, 15] });
       if (markers[r.spot.id]) markers[r.spot.id].setIcon(icon);
       else markers[r.spot.id] = L.marker([r.spot.lat, r.spot.lng], { icon, riseOnHover: true }).addTo(map)
         .on("click", () => openDetail(r.spot.id))
         .bindTooltip("", { direction: "top", offset: [0, -16], className: "tip" });
-      markers[r.spot.id].setTooltipContent(`<b>${r.spot.name}</b><br>${lb.t} · ${fmtTime(r.ev.tSet, r.tz)}`);
+      markers[r.spot.id].setTooltipContent(`<b>${r.spot.name}</b><br>${lb.t} · ${fmtTime(r.ev.tSet, r.tz)}${r.ev.bonus.bow.p >= BONUS_MIN ? `<br>🌈 ${r.ev.bonus.bow.name} ${r.ev.bonus.bow.p}%` : ""}${r.ev.bonus.dog.p >= BONUS_MIN ? `<br>◉ Sun dogs ${r.ev.bonus.dog.p}%` : ""}`);
     });
   }
 
@@ -249,7 +277,8 @@
   function renderList(list) {
     $("#list").innerHTML = list.map((r, k) => {
       const lb = label(r.ev.score);
-      const tags = r.ev.badges.filter(b => b.p >= 22).sort((a, b) => b.p - a.p).slice(0, 3).map(b => `<span class="tag ${b.id}">${b.icon} ${b.name.toLowerCase()} ${likely(b.p).toLowerCase()}</span>`);
+      const B = r.ev.bonus, btag = [B.bow, B.dog].filter(b => b.p >= BONUS_MIN).map(b => `<span class="tag bonus ${b.id} ${bonusCls(b.p)}">${b.icon} ${b.name} ${b.p}%</span>`);
+      const tags = btag.concat(r.ev.badges.filter(b => b.p >= 22 && b.id !== "bow" && b.id !== "dog").sort((a, b) => b.p - a.p).slice(0, 3 - btag.length).map(b => `<span class="tag ${b.id}">${b.icon} ${b.name.toLowerCase()} ${likely(b.p).toLowerCase()}</span>`));
       return `<li class="item" data-id="${r.spot.id}" style="--c:${lb.c};animation-delay:${k * 18}ms">
         <div class="rank">${k + 1}</div>
         <div class="meta"><div class="nm">${r.spot.name} <span class="st">${r.spot.state}</span></div>
@@ -264,7 +293,7 @@
     });
   }
   function update() {
-    compute(); renderDays(); const list = filtered(); renderHero(list); renderList(list); renderMarkers();
+    compute(); renderDays(); const list = filtered(); renderHero(list); renderBonus(list); renderList(list); renderMarkers();
     if (state.spot) openDetail(state.spot, true);
   }
 
@@ -470,6 +499,8 @@
         <div class="d-sub">Sky score <b>${ev.sky}</b> · Site fit <b>${ev.site}</b></div>
         <div class="conf ${conf.c}">${conf.t}</div></div>
       </div>
+      <h3>✨ Special bonus <small>rainbow & sun-dog odds for this spot</small></h3>
+      <div class="bonus-d">${bonusCard(ev.bonus.bow, r, { kicker: ev.bonus.bow.red ? "Red rainbow (low sun)" : "Rainbow odds" })}${bonusCard(ev.bonus.dog, r, { kicker: "Sun-dog odds" })}</div>
       ${ev.gates.length ? `<div class="gates">${ev.gates.map(g => `<div>⚠ ${g}</div>`).join("")}</div>` : ""}
       <div class="timing">
         ${RISE ? `<div><span>Civil dawn</span><b>${tw(T.civilEnd)}</b></div>
@@ -555,7 +586,7 @@
     const reg = REGIONS[state.region].states;
     const pts = SPOTS.filter(s => !reg || reg.includes(s.state)).map(s => [s.lat, s.lng]);
     map.flyToBounds(pts, { padding: [40, 40], duration: 1 });
-    const list = filtered(); renderHero(list); renderList(list);
+    const list = filtered(); renderHero(list); renderBonus(list); renderList(list);
   }));
   $("#nearme").addEventListener("click", () => {
     if (!navigator.geolocation) return;

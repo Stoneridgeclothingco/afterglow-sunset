@@ -232,7 +232,7 @@
     if (!inArc) R.push(`${RISE ? "This sunrise" : "Tonight's sunset"} azimuth (${Math.round(az)}°) is ${Math.round(off)}° outside this spot's open view — seasonal mismatch.`);
 
     // ---- §6/§7/§8 wow badges ----
-    let dog = { p: 0, t: null }, bow = { p: 0, t: null }, halo = { p: 0 };
+    let dog = { p: 0, t: null }, bow = { p: 0, t: null }, halo = { p: 0 }; const bowSer = [];
     for (let k = 0; k <= 16; k++) {
       const t = RISE ? tSet + k * 900 : tSet - 4 * 3600 + k * 900;
       const pos = sunPos(t, lat, lng); if (pos.elev < 0.3) continue;
@@ -246,7 +246,7 @@
       // §7.1 sun dogs: sun < 30° (best < 15°), thin cirrus/Cs near the sun, sun disk visible
       const elevF = pos.elev < 15 ? 1 : pos.elev < 30 ? 0.55 : 0;
       const pd = 0.5 * thin * sunVis * elevF * (pr > 0.2 ? 0.3 : 1);
-      if (pd > dog.p) dog = { p: pd, t, elev: pos.elev };
+      if (pd > dog.p) dog = { p: pd, t, elev: pos.elev, cir, sunVis };
       // §7.2 22° halo (partial arcs near sunset)
       const ph = 0.4 * pw(cir, [[0, 0], [0.2, 0.3], [0.5, 0.9], [0.9, 1], [1, 0.8]]) * sunVis * (pos.elev < 40 ? 1 : 0.6);
       if (ph > halo.p) halo = { p: ph, t };
@@ -259,15 +259,41 @@
         const clearW = pw(Math.max(WL, WM * 0.8), [[0, 1], [0.3, 0.8], [0.6, 0.25], [0.9, 0]]);
         const dry = pr > 1 ? 0.2 : pr > 0.3 ? 0.6 : 1;
         const pb = 0.6 * rainEast * conv * clearW * dry;
-        if (pb > bow.p) bow = { p: pb, t, elev: pos.elev, red: RISE ? t <= tSet + 15 * 60 : t >= tSet - 15 * 60 };
+        bowSer.push({ t, p: pb });
+        if (pb > bow.p) bow = { p: pb, t, elev: pos.elev, red: RISE ? t <= tSet + 15 * 60 : t >= tSet - 15 * 60, rainEast, clearW, shower: conv === 1, dry };
       }
     }
     const wLoBlock = slotBlock;
+    // rainbow window: contiguous 15-min steps around the peak where odds stay ≥ half the peak (min 3%)
+    let bowWin = null;
+    if (bow.t && bowSer.length) {
+      const thr = Math.max(0.03, bow.p * 0.5), k0 = bowSer.findIndex(x => x.t === bow.t);
+      let a = k0, b = k0;
+      while (a > 0 && bowSer[a - 1].p >= thr && bowSer[a - 1].t === bowSer[a].t - 900) a--;
+      while (b < bowSer.length - 1 && bowSer[b + 1].p >= thr && bowSer[b + 1].t === bowSer[b].t + 900) b++;
+      let st = bowSer[a].t - 450, en = bowSer[b].t + 450;
+      // geometry: no bow once the sun is below the horizon (sunset) / before it rises (sunrise)
+      if (RISE) st = Math.max(st, tSet); else en = Math.min(en, tSet);
+      bowWin = { start: st, end: en, min: Math.max(15, Math.round((en - st) / 60 / 5) * 5) };
+    }
+    // ---- BONUS cards (sun dogs / rainbows): explicit odds % + data-driven why (Metric Bible §6/§7) ----
+    const P100 = x => Math.round(clamp(x) * 100);
+    const SUNSIDE = RISE ? "east" : "west", ANTI = RISE ? "west" : "east";
+    const bonus = {
+      dog: { id: "dog", name: "Sun dogs", icon: "◉", p: P100(dog.p), t: dog.t,
+        why: dog.p >= 0.03 ? `Sun dogs ${P100(dog.p)}% — ${Math.round((dog.cir || 0) * 100)}% thin cirrus/ice cloud with the sun at ${dog.elev.toFixed(0)}° and ${Math.round((dog.sunVis || 0) * 100)}% sun-disk visibility. Look ~22° left & right of the sun.`
+          : `Sun dogs ~0% — needs thin cirrus/ice cloud and a visible sun below ~25°; ${Math.round(hi * 100)}% high cloud ${RISE ? "this morning" : "today"}.`,
+        look: "22° either side of the sun" },
+      bow: { id: "bow", name: bow.red ? "Red rainbow" : "Rainbow", icon: "🌈", p: P100(bow.p), t: bow.t, red: !!bow.red, win: bowWin,
+        why: bow.p >= 0.03 ? `Rainbow ${P100(bow.p)}% — ${Math.round((bow.rainEast || 0) * 100)}% rain signal to the ${ANTI}${bow.shower ? " (showers)" : ""}, ${SUNSIDE} sky ${Math.round((bow.clearW || 0) * 100)}% clear for sunlight, sun at ${bow.elev.toFixed(0)}° (< 42°). Look ${ANTI}, opposite the sun.${bow.red ? ` Sun this low turns the bow red/orange.` : ""}`
+          : `Rainbow ~0% — needs showers to the ${ANTI}, a clear ${SUNSIDE} sky and the sun under 42°; no rain is forecast on the ${ANTI} side.`,
+        look: `${ANTI}, opposite the sun` },
+    };
     const pct = x => Math.round(clamp(x) * 100);
     const badges = [
       { id: "dog", name: "Sun dogs", p: pct(dog.p), t: dog.t, icon: "◉", why: dog.p >= 0.1 ? "Thin cirrus with a visible low sun — look ~22° left and right of the sun." : "Needs thin cirrus/cirrostratus with the sun visible below ~25°." },
       { id: "halo", name: "22° halo", p: pct(halo.p), t: halo.t, icon: "◯", why: "Ring 22° around the sun from cirrostratus; near sunset only partial arcs show." },
-      { id: "bow", name: bow.red ? "Red rainbow" : "Rainbow", p: pct(bow.p), t: bow.t, icon: "🌈", why: RISE ? (bow.p >= 0.1 ? `Showers west while the sun shines from the east — look west (antisolar point).${bow.red ? " Right after sunrise the bow is red/orange." : ""}` : "Needs showers to the west, a clear eastern sky, and a dry viewer.") : bow.p >= 0.1 ? `Showers east while the sun shines from the west — look east (antisolar point).${bow.red ? " Near sunset the bow turns red/orange." : ""}` : "Needs showers to the east, a clear western sky, and a dry viewer." },
+      { id: "bow", name: bow.red ? "Red rainbow" : "Rainbow", p: pct(bow.p), t: bow.t, icon: "🌈", why: `${pct(bow.p)}% odds. ` + (RISE ? (bow.p >= 0.1 ? `Showers west while the sun shines from the east — look west (antisolar point).${bow.red ? " Right after sunrise the bow is red/orange." : ""}` : "Needs showers to the west, a clear eastern sky, and a dry viewer.") : bow.p >= 0.1 ? `Showers east while the sun shines from the west — look east (antisolar point).${bow.red ? " Near sunset the bow turns red/orange." : ""}` : "Needs showers to the east, a clear western sky, and a dry viewer.") },
       { id: "pillar", name: "Sun pillar", p: pct(0.4 * pw(hi, [[0, 0], [0.15, 0.4], [0.4, 1], [0.8, 0.7], [1, 0.4]]) * (1 - wLoBlock) * (s.temp < 40 ? 1.3 : 1)), t: tSet + (RISE ? -3 : 3) * 60, icon: "┃", why: "Vertical light column from plate crystals as the sun nears/just clears the horizon." },
       { id: "rays", name: "Crepuscular rays", p: pct(0.7 * pw((path[0].low + path[0].mid * 0.5) / 100, [[0, 0], [0.2, 0.4], [0.35, 1], [0.65, 1], [0.85, 0.2]]) * (s.aod != null ? pw(s.aod, [[0, 0.5], [0.1, 1], [0.3, 1], [0.6, 0.5]]) : 0.8)), t: tSet + (RISE ? 10 : -10) * 60, icon: "☀", why: `Broken cloud on the ${dir} horizon plus a little haze casts visible shafts.` },
       { id: "venus", name: "Belt of Venus", p: pct(0.8 * (1 - clamp(((s.eLow || 0) + (s.eMid || 0) * 0.6) / 100)) * clean * (1 - hi * 0.6)), t: tSet + (RISE ? -10 : 10) * 60, icon: "▬", why: RISE ? "Pink band above Earth's blue shadow in the WEST, ~5–20 min before sunrise. Needs a clear western sky." : "Pink band above Earth's blue shadow in the EAST, ~5–20 min after sunset. Needs a clear eastern sky." },
@@ -281,7 +307,7 @@
     else if (Math.abs(age - 14.77) <= 1.6) badges.push({ id: "moon", name: "Full moon rise", p: 80, t: tSet, icon: "🌕", why: `Moon ${age < 14.77 ? "rises shortly before" : "rises shortly after"} sunset, opposite the sun.` });
     else if (age >= 1.2 && age <= 4.5) badges.push({ id: "moon", name: "Crescent moon", p: 60, t: tSet + 20 * 60, icon: "🌒", why: "Thin crescent low in the west in the afterglow." });
 
-    return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
+    return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, bonus, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
       clouds: cloudTypes(s), sunsetAz: az, canvasCover, slotBlock, clean, rhLow, dewDep, dP6, dP24, dDew, fropaH, front, timing,
       siteInfo: { inArc, off, alignQ, obst: sp.obst, water: sp.water, surface, arc: sp.arc }, season, screen };
   }

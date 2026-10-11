@@ -367,3 +367,41 @@ body.mode-sunrise .rise-only{display:block}
 #tg-rise.on{background:linear-gradient(135deg,#ffd08a,#f7a8b8)}
 #tg-set.on{background:linear-gradient(135deg,#ff8a3d,#ff4f9a);color:#fff}
 @media (max-width:560px){.top{flex-wrap:wrap}.top-ctl{width:100%;justify-content:space-between}}
+
+/* ---- Special bonus: rainbows & sun dogs (v16) ---- */
+.bonus{display:grid;gap:8px;margin:12px 0}
+.bonus:empty{display:none}
+.bonus-h{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#ffd7b0;display:flex;flex-direction:column;gap:2px}
+.bonus-h small{text-transform:none;letter-spacing:0;color:var(--mute);font-size:11.5px}
+.bonus-d{display:grid;gap:8px;margin-bottom:6px}
+.bcard{position:relative;display:grid;grid-template-columns:40px 1fr auto;gap:2px 10px;align-items:center;padding:12px 14px 14px;border-radius:14px;border:1px solid var(--line);background:rgba(255,255,255,.04);overflow:hidden}
+.bcard[data-id]{cursor:pointer}.bcard[data-id]:hover{transform:translateY(-1px)}
+.bc-ic{font-size:28px;text-align:center;line-height:1}
+.bcard.dog .bc-ic{color:#ffe4a3;font-size:24px}
+.bc-k{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute)}
+.bc-n{font-weight:700;font-size:15px}.bc-n small{font-weight:500;color:var(--mute);font-size:12px}
+.bc-why{font-size:12px;color:#e6dcef;line-height:1.4;margin-top:2px}.bc-why em{color:var(--sun);font-style:normal;white-space:nowrap}
+.bc-p{text-align:right;display:flex;flex-direction:column;align-items:flex-end}
+.bc-p b{font-size:26px;font-family:var(--serif);line-height:1}.bc-p span{font-size:11px;color:var(--mute);margin-top:2px}
+.bc-bar{position:absolute;left:0;right:0;bottom:0;height:4px;background:rgba(255,255,255,.06)}
+.bc-bar i{display:block;height:100%;border-radius:0 4px 4px 0}
+.bcard.bow .bc-bar i{background:linear-gradient(90deg,#ff4d4d,#ff9a3d,#ffe14d,#5fd36b,#4da6ff,#8a5cff)}
+.bcard.bow.red .bc-bar i{background:linear-gradient(90deg,#b3122e,#ff4d2e,#ff9a3d)}
+.bcard.dog .bc-bar i{background:linear-gradient(90deg,#ffd27a,#fff3c4)}
+.bcard.bow.hi,.bcard.bow.md{border-color:rgba(120,190,255,.55);background:radial-gradient(circle at 95% 0,rgba(120,190,255,.2),transparent 60%),rgba(255,255,255,.05)}
+.bcard.bow.red.hi,.bcard.bow.red.md{border-color:rgba(255,90,70,.6);background:radial-gradient(circle at 95% 0,rgba(255,90,70,.22),transparent 60%),rgba(255,255,255,.05)}
+.bcard.dog.hi,.bcard.dog.md{border-color:rgba(255,210,122,.6);background:radial-gradient(circle at 95% 0,rgba(255,210,122,.2),transparent 60%),rgba(255,255,255,.05)}
+.bcard.hi .bc-p b{color:var(--sun)}.bcard.bow.hi .bc-p b,.bcard.bow.md .bc-p b{color:#9fd4ff}.bcard.bow.red .bc-p b{color:#ff7a5c}
+.bcard.no{opacity:.5;filter:grayscale(.85)}
+.tag.bonus{font-weight:600;color:#160f24}
+.tag.bonus.bow{background:linear-gradient(90deg,#ffb3b3,#ffe1a3,#c9f2b0,#b3dcff,#d6c2ff)}
+.tag.bonus.dog{background:#ffe4a3}
+.tag.bonus.lo{opacity:.8}
+.pin{position:relative}
+.pin .pb{position:absolute;font-style:normal;font-size:12px;line-height:1;top:-8px;right:-9px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))}
+.pin .pb.dog{right:auto;left:-8px;color:#ffe4a3;font-size:11px}
+.bc-win{grid-column:1/4;grid-row:2;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px}
+.bc-win div{background:rgba(255,255,255,.06);border-radius:9px;padding:6px 8px;display:flex;flex-direction:column}
+.bc-win span{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute)}.bc-win b{font-size:13px}
+.bcard .bc-p{grid-column:3;grid-row:1}
+.tag{white-space:nowrap}
