@@ -76,6 +76,9 @@
     for (let i = 0; i < 70; i++) G.stars.push({ x: r() * W, y: r() * H * 0.4, s: r() * 1.4 + 0.3, a: r() });
     for (let i = 0; i < 80; i++) G.rain.push({ x: r() * W, y: H * (0.25 + r() * 0.3) });
     for (let i = 0; i < 46; i++) G.ripples.push({ y: r(), w: r(), j: r() - 0.5 });
+    // water-surface texture: wavelets (troughs/crests), whitecaps and reflection-strip jitter — fixed per spot/day, moved by time
+    G.waves = Array.from({ length: 220 }, () => ({ y: r(), x: r(), w: r(), k: r(), s: r() }));
+    G.caps = Array.from({ length: 170 }, () => ({ y: r(), x: r(), w: r(), k: r(), s: r() }));
     return G;
   }
 
@@ -212,27 +215,83 @@
     // haze veil at the horizon
     if (haze > 0.02) { const hzG = ctx.createLinearGradient(0, hz - H * 0.3, 0, hz); hzG.addColorStop(0, "rgba(220,200,190,0)"); hzG.addColorStop(1, rgba(mix([220, 200, 190], hor, 0.5), haze)); ctx.fillStyle = hzG; ctx.fillRect(0, 0, W, hz); }
 
-    // 6) ground: water mirrors the sky, land is a silhouette
+    // 6) ground: water mirrors the sky, land is a silhouette.
+    // WATER SURFACE follows the forecast wind / gusts (+ wave height) at this exact time: glassy → mirror reflection;
+    // breezy → wavelets break the reflection into strips and widen the sun's glitter path; windy → whitecaps.
+    const SEA = spot.water !== false ? ((window.Model.seaAt && window.Model.seaAt(ev, t)) || (window.Model.seaState ? window.Model.seaState({ wind: s.wind || 0, gust: s.gust || 0 }, 0.5) : null)) : null;
     const wb = ctx.createLinearGradient(0, hz, 0, H); wb.addColorStop(0, rgba(mix(hor, [16, 14, 34], 0.5))); wb.addColorStop(1, "rgb(8,8,20)");
     ctx.fillStyle = wb; ctx.fillRect(0, hz, W, H - hz);
     if (spot.water !== false) {
-      const rh = Math.min(hz, (H - hz) * 1.6);
-      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 0.42;
-      ctx.translate(0, 2 * hz * dpr); ctx.scale(1, -1);
-      ctx.drawImage(canvas, 0, (hz - rh) * dpr, W * dpr, rh * dpr, 0, (hz - rh) * dpr, W * dpr, rh * dpr);
-      ctx.restore();
-      const dk = ctx.createLinearGradient(0, hz, 0, H); dk.addColorStop(0, "rgba(8,8,22,0.05)"); dk.addColorStop(1, "rgba(8,8,22,0.75)"); ctx.fillStyle = dk; ctx.fillRect(0, hz, W, H - hz);
-      // sun glitter path
-      const gl = clamp((elev + 1.5) / 4) * lightIn * (1 - haze);
-      for (const rp of G.ripples) {
-        const yy = hz + 2 + rp.y * (H - hz), d = (yy - hz) / (H - hz), w = (20 + rp.w * 50) * (0.4 + d * 2) * H / 300;
-        ctx.fillStyle = rgba(ramp(elev, LIGHT), gl * 0.6 * (1 - d * 0.6)); ctx.fillRect(sunX - w / 2 + rp.j * 30 * d, yy, w, 1.4);
-        ctx.fillStyle = `rgba(0,0,10,${0.12 + 0.1 * d})`; ctx.fillRect((rp.w * 1.7 % 1) * W - 40, yy + 3, 80 + rp.j * 60, 1.2);
+      const chop = SEA ? SEA.chop : clamp(windMph / 25), swell = SEA ? SEA.swell : 0, caps = SEA ? SEA.caps : clamp((windMph - 10) / 18), mirror = SEA ? SEA.mirror : clamp(1 - windMph / 8);
+      const ph = t / 420;   // wave motion: advances with the slider / Play
+      const WH = H - hz, rh = Math.min(hz, WH * 1.6), reflA = 0.4 + 0.42 * mirror - 0.12 * chop;
+      if (chop < 0.1) {   // slick: one clean mirror image of the sky
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = reflA;
+        ctx.translate(0, 2 * hz * dpr); ctx.scale(1, -1);
+        ctx.drawImage(canvas, 0, (hz - rh) * dpr, W * dpr, rh * dpr, 0, (hz - rh) * dpr, W * dpr, rh * dpr);
+        ctx.restore();
+      } else {            // rippled: the reflection breaks into horizontal strips that wobble sideways and smear vertically
+        ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+        const rr = rng(spot.id + "refl");
+        for (let y = hz; y < H; ) {
+          const d = (y - hz) / WH, sh = Math.max(1, (1 + chop * 5) * (0.35 + d * 2.2));
+          const src = 2 * hz - y - sh * (1 + chop * 2.5 * rr()), dx = Math.sin(y * 0.9 + ph * 6.283 + rr() * 6) * chop * (2 + 26 * d) + (rr() - 0.5) * chop * 10 * d;
+          if (src > hz - rh && src > 0) {
+            ctx.globalAlpha = clamp(reflA * (1 - 0.35 * chop * rr()));
+            ctx.drawImage(canvas, 0, src * dpr, W * dpr, Math.max(1, sh * (1 + chop)) * dpr, dx * dpr, y * dpr, W * dpr, sh * dpr);
+          }
+          y += sh;
+        }
+        ctx.restore();
       }
-    }
-    if (spot.water !== false && windMph >= 15) {   // whitecaps on windy water
-      const rw = rng(spot.id + "caps"), n = Math.round(clamp((windMph - 12) / 20) * 60) + 10;
-      ctx.fillStyle = "rgba(230,235,245,0.35)"; for (let i = 0; i < n; i++) { const d = rw(), yy = hz + 4 + d * d * (H - hz - 6); ctx.fillRect(rw() * W, yy, (3 + rw() * 10) * (0.4 + d * 1.6), 1.2); }
+      const dk = ctx.createLinearGradient(0, hz, 0, H); dk.addColorStop(0, `rgba(8,8,22,${0.03 + 0.06 * chop})`); dk.addColorStop(1, `rgba(8,8,22,${0.32 + 0.25 * (1 - mirror)})`); ctx.fillStyle = dk; ctx.fillRect(0, hz, W, H - hz);
+      // swell: broad lit / shadowed bands rolling toward the shore (from wave height; wind sea if no marine data)
+      if (swell > 0.04) {
+        const nb = 9;
+        for (let k = 0; k < nb; k++) {
+          const f = ((k + ph * 0.6) % nb) / nb, d = f * f, yy = hz + 1 + d * WH, bh = (2 + 30 * d) * (0.4 + swell);
+          const gB = ctx.createLinearGradient(0, yy - bh, 0, yy + bh);
+          gB.addColorStop(0, rgba(hor, 0)); gB.addColorStop(0.45, rgba(mix(hor, [255, 255, 255], 0.1), 0.1 * swell * (0.3 + d))); gB.addColorStop(0.55, `rgba(0,0,12,${0.22 * swell * (0.3 + d)})`); gB.addColorStop(1, "rgba(0,0,12,0)");
+          ctx.fillStyle = gB; ctx.fillRect(0, yy - bh, W, bh * 2);
+        }
+      }
+      // sun glitter path: a tight mirror column when glassy, a wide broken sparkle field when choppy
+      const gl = clamp((elev + 1.5) / 4) * lightIn * (1 - haze), lc = ramp(elev, LIGHT);
+      if (gl > 0.01 && mirror > 0.05) {   // still-water sun reflection
+        const cw = sunR * (1.2 + 2 * (1 - mirror)), cg = ctx.createLinearGradient(0, hz, 0, H);
+        cg.addColorStop(0, rgba(mix(lc, [255, 250, 230], 0.4), gl * mirror * 0.9)); cg.addColorStop(0.5, rgba(lc, gl * mirror * 0.35)); cg.addColorStop(1, rgba(lc, 0));
+        ctx.fillStyle = cg; ctx.fillRect(sunX - cw, hz, cw * 2, WH);
+      }
+      const spread = 0.35 + 2.6 * chop;
+      for (const rp of G.ripples) {
+        if (rp.w < chop * 0.35 && chop > 0.5) continue;   // broken path when rough
+        const yy = hz + 2 + rp.y * WH, d = (yy - hz) / WH, w = (20 + rp.w * 50) * (0.4 + d * 2) * H / 300 * spread;
+        ctx.fillStyle = rgba(lc, gl * (0.25 + 0.5 * (1 - mirror)) * (1 - d * 0.6)); ctx.fillRect(sunX - w / 2 + rp.j * (10 + 60 * chop) * d + Math.sin(ph * 6.283 + rp.y * 40) * chop * 6, yy, w, 1 + chop * 1.4);
+      }
+      // wavelets: dark troughs + sky-lit crests; count, length and contrast scale with chop
+      const nW = Math.round(G.waves.length * clamp(0.04 + chop * 1.05));
+      for (let i = 0; i < nW; i++) {
+        const wv = G.waves[i], d = Math.pow(wv.y, 1.7), yy = hz + 2 + d * (WH - 3);
+        const len = (6 + wv.w * 30) * (0.3 + d * 2.4) * H / 300 * (1.4 - 0.6 * chop), th = (0.5 + d * 2.4) * (0.35 + chop);
+        const x = ((wv.x * W + (ph * (8 + 30 * wv.s) * (0.3 + d)) * (wv.k > 0.5 ? 1 : -1)) % W + W) % W;
+        ctx.fillStyle = `rgba(0,0,12,${(0.06 + 0.3 * chop) * (0.5 + d)})`; ctx.fillRect(x - len / 2, yy + th * 0.6, len, th);
+        ctx.fillStyle = rgba(mix(hor, [255, 255, 255], 0.2), (0.06 + 0.4 * chop) * (0.4 + d) * (0.5 + 0.5 * clamp((elev + 5) / 6))); ctx.fillRect(x - len * 0.4, yy, len * 0.8, Math.max(0.6, th * 0.6));
+      }
+      // whitecaps: appear from ~10 mph (scattered) to everywhere by ~28 mph; they flicker as they break and drift downwind
+      const nC = Math.round(G.caps.length * Math.min(1, caps * 1.2));
+      if (nC) {
+        const bright = 0.25 + 0.65 * clamp((elev + 5) / 8), cc = mix(mix(hor, [120, 124, 140], 0.6), [240, 242, 248], bright);
+        const life = Math.floor(ph * 3);
+        for (let i = 0; i < nC; i++) {
+          const c = G.caps[i], d = Math.pow(c.y, 1.5), yy = hz + 3 + d * (WH - 6);
+          const on = ((((i * 7919 + life * 104729) >>> 0) % 1000) / 1000) < 0.55 + 0.4 * caps; if (!on) continue;
+          const age = (ph * 3) % 1, wdt = (2 + c.w * 7) * (0.25 + d * 1.8) * H / 300 * (0.7 + 0.5 * caps) * (0.6 + 0.4 * Math.sin(age * 3.14));
+          const x = ((c.x * W + ph * 22 * (0.3 + d) * (c.k - 0.3)) % W + W) % W;
+          ctx.fillStyle = rgba(cc, (0.3 + 0.4 * c.s) * (0.6 + 0.4 * caps) * (1 - 0.5 * age));
+          ctx.beginPath(); ctx.ellipse(x, yy, wdt, Math.max(0.5, wdt * 0.1), 0, 0, 6.283); ctx.fill();
+          if (caps > 0.55 && c.s > 0.7) { ctx.fillStyle = rgba(cc, 0.18 * caps); ctx.beginPath(); ctx.ellipse(x + wdt * 0.6, yy + wdt * 0.08, wdt * 1.5, wdt * 0.14, 0, 0, 6.283); ctx.fill(); }   // streaks / spray
+        }
+      }
     }
     silhouette(ctx, spot, W, H, hz, rng(spot.id + "fg"));
     // fog: only when the forecast has fog codes / visibility < 1 km in the event window
@@ -249,7 +308,7 @@
     const bow = ev.bonus && ev.bonus.bow, bwin = bow && bow.win;
     const bowOn = !!(bow && bow.p >= 10 && bwin && t >= bwin.start && t <= bwin.end && app > -0.3 && elev < 42);
     if (bowOn) rainbowPanel(ctx, W, H, bow, elev, clamp(Math.min(t - bwin.start, bwin.end - t) / 420), lightIn, slant, fall);
-    return { elev, phase: phaseOf(elev, ev.timing.dom), lit: L, bow: bowOn, bolt: !!boltNear };
+    return { elev, phase: phaseOf(elev, ev.timing.dom), lit: L, bow: bowOn, bolt: !!boltNear, sea: SEA };
   }
 
   // Inset panel: the antisolar sky (behind the viewer) with the rain shaft and the bow.

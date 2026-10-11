@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="styles.css?v=21">
+<link rel="stylesheet" href="styles.css?v=22">
 </head>
 <body>
 <script>
@@ -91,7 +91,7 @@
     <div><h4>NOAA data</h4><p>Cloud layers, visibility, humidity and rain at sunset come from NOAA's HRRR model (3 km, read directly from NOAA grib2 for tonight and tomorrow) and NOAA GFS beyond 48 h. Tonight is cross-checked against GOES-19 Level-2 observations (cloud mask, cloud-top height, cloud phase, aerosol optical depth), HRRR-Smoke and nearby METARs. Every metric is tagged NOAA obs / NOAA model / Estimate / Fallback.</p></div>
     <div><h4>Honest limits</h4><p>Forecast skill drops fast after ~2 days. GOES sees cloud tops only, and AOD only in clear daytime pixels. Cloud genus is still partly inferred. PM2.5 and AOD beyond tonight come from CAMS (non-NOAA, labelled Fallback). The spot preview is an illustration generated from the forecast numbers, not a photo.</p></div>
   </div>
-  <p class="credits">Weather: NOAA HRRR & GFS (NCEP; HRRR via <a href="https://registry.opendata.aws/noaa-hrrr-pds/" target="_blank" rel="noopener">NOAA Open Data on AWS</a>, hourly series via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> mirror, CC BY 4.0) · GOES-19 ABI L2 (<a href="https://registry.opendata.aws/noaa-goes/" target="_blank" rel="noopener">NOAA Open Data</a>) · METAR: <a href="https://aviationweather.gov" target="_blank" rel="noopener">NOAA Aviation Weather Center</a> · Satellite: NOAA GOES-East via <a href="https://www.star.nesdis.noaa.gov/goes/" target="_blank" rel="noopener">NESDIS STAR</a> and <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa Environmental Mesonet</a> · Map © Esri, OpenStreetMap · <span class="site-copy">© Sean Tuttle 2026</span></p>
+  <p class="credits">Weather: NOAA HRRR & GFS (NCEP; HRRR via <a href="https://registry.opendata.aws/noaa-hrrr-pds/" target="_blank" rel="noopener">NOAA Open Data on AWS</a>, hourly series via <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> mirror, CC BY 4.0) · GOES-19 ABI L2 (<a href="https://registry.opendata.aws/noaa-goes/" target="_blank" rel="noopener">NOAA Open Data</a>) · METAR: <a href="https://aviationweather.gov" target="_blank" rel="noopener">NOAA Aviation Weather Center</a> · Satellite: NOAA GOES-East via <a href="https://www.star.nesdis.noaa.gov/goes/" target="_blank" rel="noopener">NESDIS STAR</a> and <a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa Environmental Mesonet</a> · Waves: <a href="https://open-meteo.com/en/docs/marine-weather-api" target="_blank" rel="noopener">Open-Meteo Marine</a> · Map © Esri, OpenStreetMap · <span class="site-copy">© Sean Tuttle 2026</span></p>
 </section>
 
 <div id="scrim" class="scrim"></div>
@@ -106,12 +106,12 @@
 <div id="loading" class="loading"><div class="ld-sun"></div><p>Reading the sky…</p></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="spots.js?v=21"></script>
-<script src="model.js?v=21"></script>
-<script src="preview.js?v=21"></script>
-<script src="photoreal.js?v=21"></script>
-<script src="photostage.js?v=21"></script>
-<script src="satellite.js?v=21"></script>
+<script src="spots.js?v=22"></script>
+<script src="model.js?v=22"></script>
+<script src="preview.js?v=22"></script>
+<script src="photoreal.js?v=22"></script>
+<script src="photostage.js?v=22"></script>
+<script src="satellite.js?v=22"></script>
 <script>
   (function () {
     var m = new URLSearchParams(location.search).get("mode"); if (m !== "sunrise" && m !== "sunset") return;
@@ -127,6 +127,6 @@
     }
   })();
 </script>
-<script src="app.js?v=21"></script>
+<script src="app.js?v=22"></script>
 </body>
 </html>

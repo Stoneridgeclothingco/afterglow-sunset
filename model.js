@@ -209,7 +209,8 @@
     const obstQ = pw(sp.obst, [[0, 1], [1, 0.9], [3, 0.7], [5, 0.4]]);
     const waterQ = sp.water ? 1 : 0.6;
     const mph = s.wind;
-    const surface = !sp.water ? "No water foreground" : mph < 5 ? "Calm — mirror reflections likely" : mph < 15 ? "Light breeze — glitter path on the water" : "Choppy — reflections broken up";
+    const seaPk = sp.water ? seaState({ wind: s.wind || 0, gust: s.gust || 0, wave: at(h, "wave_m", tSet) }, SEA_EXPO[sp.type] != null ? SEA_EXPO[sp.type] : 0.5) : null;
+    const surface = !sp.water ? "No water foreground" : `Water at ${EV}: ${seaPk.name} — ${seaPk.txt}`;
     const windQ = !sp.water ? 0.8 : mph < 5 ? 1 : mph < 15 ? 0.9 : 0.7;
     const site = Math.round(100 * (0.45 * alignQ + 0.25 * obstQ + 0.2 * waterQ + 0.1 * windQ));
     const score = Math.round(sky * (0.78 + 0.22 * site / 100));
@@ -290,7 +291,7 @@
       const conv = capeF * clamp(Math.max(pp, epp) * 1.1) * (isShowery(sc) || isShowery(ec) ? 1 : 0.6);
       const lp = clamp(Math.max(isThunder(sc) ? 0.7 + 0.25 * capeF : 0, isThunder(ec) ? 0.6 + 0.25 * capeF : 0, conv), 0, 0.95);
       wxSer.push({ t, sc, ec, lp, where: isThunder(sc) ? "at the spot" : isThunder(ec) ? `~12 km ${RISE ? "west" : "east"}` : "nearby (unstable air)",
-        pr, ep, wp, pp, wind: at(h, "wind_speed_10m", t) || 0, gust: at(h, "wind_gusts_10m", t) || 0, wdir: at(h, "wind_direction_10m", t),
+        pr, ep, wp, pp, wind: at(h, "wind_speed_10m", t) || 0, gust: at(h, "wind_gusts_10m", t) || 0, wdir: at(h, "wind_direction_10m", t), wave: at(h, "wave_m", t),
         low: at(h, "cloud_cover_low", t) || 0, tot: at(h, "cloud_cover", t) || 0, vis: at(h, "visibility", t) });
     }
     const mx = k => wxSer.reduce((a, x) => Math.max(a, x[k] || 0), 0);
@@ -311,6 +312,8 @@
     wx.bolt = { p: boltP, t: bolt.t, win: boltWin, where: bolt.where };
     wx.wind = { mph: Math.round(windMx), gust: Math.round(gustMx), dir: s.wdir };
     wx.rain = { mm: +rainMm.toFixed(1), pp: Math.round(rainPp * 100) };
+    // ---- WATER SURFACE through the event window (wind / gusts every 15 min + wave height toward the sun when the marine model has it) ----
+    const sea = sp.water ? { ser: wxSer.map(x => ({ t: x.t, wind: x.wind, gust: x.gust, wave: x.wave })), expo: SEA_EXPO[sp.type] != null ? SEA_EXPO[sp.type] : 0.5 } : null;
     // ---- TRIFECTA: epic color + epic rainbow + epic lightning lined up in the same window ----
     const EP = EPIC;
     const bowP = P100w(bow.p);
@@ -352,10 +355,39 @@
     else if (age >= 1.2 && age <= 4.5) badges.push({ id: "moon", name: "Crescent moon", p: 60, t: tSet + 20 * 60, icon: "🌒", why: "Thin crescent low in the west in the afterglow." });
 
     return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, bonus, wx, tri, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
-      clouds: cloudTypes(s), sunsetAz: az, canvasCover, slotBlock, clean, rhLow, dewDep, dP6, dP24, dDew, fropaH, front, timing,
+      sea, clouds: cloudTypes(s), sunsetAz: az, canvasCover, slotBlock, clean, rhLow, dewDep, dP6, dP24, dDew, fropaH, front, timing,
       siteInfo: { inArc, off, alignQ, obst: sp.obst, water: sp.water, surface, arc: sp.arc }, season, screen };
   }
 
+
+  // ---- Water surface state (drives the animation): continuous 0..1 scales, not just buckets ----
+  // Effective wind = sustained + 30% of the gust excess (gusts roughen the surface in cat's-paw patches).
+  // chop:   0 glassy (< 2 mph) · .12 light ripples (4) · .28 small wavelets (7) · .45 light chop (11) · .6 choppy (15) · .75 rough (20) · .87 (25) · 1 (32+ mph)
+  // caps:   whitecaps start ~10 mph (Beaufort 3 "scattered"), widespread by ~28 mph; breaking surf adds caps on exposed beaches when waves ≥ ~3 ft
+  // mirror: 1 = mirror-still reflections, fades out by ~9 mph
+  // swell:  wave height (Open-Meteo marine, ~6 km toward the sun) — 0.5 ft .08 · 1 ft .2 · 2 ft .4 · 3 ft .58 · 5 ft .8 · 8 ft 1, × exposure (sheltered marsh/harbor 0.35–0.45)
+  const SEA_EXPO = { Beach: 1, Pier: 1, Lighthouse: 0.9, Bluff: 0.9, Boardwalk: 0.6, Dunes: 0.6, Waterfront: 0.45, Harbor: 0.4, Marsh: 0.35 };
+  const SEA_CHOP = [[0, 0], [2, 0.03], [4, 0.12], [7, 0.28], [11, 0.45], [15, 0.6], [20, 0.75], [25, 0.87], [32, 1]];
+  function seaState(x, expo = 0.5) {
+    const wind = x.wind || 0, gust = Math.max(wind, x.gust || 0), eff = wind + 0.3 * (gust - wind);
+    const ft = x.wave != null && isFinite(x.wave) ? x.wave * 3.281 : null;
+    const chop = pw(eff, SEA_CHOP);
+    const swell = ft != null ? pw(ft, [[0, 0], [0.5, 0.08], [1, 0.2], [2, 0.4], [3, 0.58], [5, 0.8], [8, 1]]) * expo : chop * 0.5 * expo;
+    const caps = clamp(Math.max(pw(eff, [[0, 0], [9, 0], [12, 0.15], [16, 0.38], [20, 0.6], [28, 0.92], [35, 1]]), ft != null ? clamp((ft - 3) / 6) * expo * 0.7 : 0));
+    const mirror = clamp(1 - pw(eff, [[0, 0], [2, 0.05], [4, 0.3], [6, 0.6], [9, 1]]));
+    const name = eff < 3 ? "Glassy" : eff < 7 ? "Calm" : eff < 11 ? "Light chop" : eff < 16 ? "Choppy" : eff < 22 ? "Rough" : "Very rough";
+    const txt = (eff < 3 ? "slick, mirror reflections" : eff < 7 ? "light ripples, strong reflections" : eff < 11 ? "small wavelets, glitter path, softened reflections" : eff < 16 ? "scattered whitecaps, broken reflections" : eff < 22 ? "frequent whitecaps, reflections gone" : "whitecaps & spray everywhere")
+      + ` (wind ${Math.round(wind)} mph, gusts ${Math.round(gust)}${ft != null ? `, ${ft < 1 ? "waves under 1 ft" : `waves ~${Math.round(ft)} ft`}` : ""})`;
+    return { chop, swell, caps, mirror, eff, wind, gust, ft, name, txt };
+  }
+  // sea state at any moment of the event window (interpolated between the 15-min forecast steps)
+  function seaAt(ev, t) {
+    const S = ev && ev.sea; if (!S || !S.ser.length) return null;
+    const a = S.ser; let i = 0; while (i < a.length - 2 && a[i + 1].t <= t) i++;
+    const p = a[i], q = a[Math.min(i + 1, a.length - 1)], f = q.t > p.t ? clamp((t - p.t) / (q.t - p.t)) : 0;
+    const L = k => p[k] == null ? q[k] : q[k] == null ? p[k] : p[k] + (q[k] - p[k]) * f;
+    return seaState({ wind: L("wind"), gust: L("gust"), wave: L("wave") }, S.expo);
+  }
 
   function label(score) {
     if (score >= 85) return { t: "Epic", c: "#ff4f9a" };
@@ -368,5 +400,5 @@
   const EPIC = { color: 85, bow: 40, bolt: 40 };
   const likely = p => p >= 40 ? "High" : p >= 22 ? "Moderate" : p >= 10 ? "Low" : "Unlikely";
 
-  g.Model = { sunPos, offset, evaluate, label, likely, clamp, timeAtElev, EPIC };
+  g.Model = { sunPos, offset, evaluate, label, likely, clamp, timeAtElev, EPIC, seaState, seaAt };
 })(window);

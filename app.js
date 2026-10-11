@@ -112,6 +112,27 @@
   }
 
 
+  // ---------- Marine (wave height) for the water surface animation ----------
+  // Open-Meteo Marine (ECMWF WAM / NOAA GFS-Wave blend), sampled ~6 km out toward the sun so it's the water you're looking at.
+  // Optional: if it fails/slow, the water is driven by the wind & gusts alone.
+  async function loadMarine() {
+    const sig = SPOTS.map(s => s.id).join("|"), K = "afterglow-v15-marine-" + MODE, c = lsGet(K);
+    if (c && c.sig === sig && Date.now() - c.at < 3 * 3600 * 1000 && c.M && c.M.length === SPOTS.length) return c.M;
+    try {
+      const pts = SPOTS.map(sp => offset(sp.lat, sp.lng, sp.az, 6));
+      const M = await Promise.race([fetchBatch(pts, "wave_height", null, "https://marine-api.open-meteo.com/v1/marine", null, 1), sleep(8000).then(() => null)]);
+      if (M && M.length === SPOTS.length) { lsSet(K, { at: Date.now(), sig, M }); return M; }
+    } catch (e) { console.warn("marine waves unavailable", e); }
+    return c && c.sig === sig && c.M ? c.M : null;
+  }
+  function applyMarine(d, M) {
+    if (!M) return;
+    SPOTS.forEach((sp, i) => { const h = d.S[i] && d.S[i].hourly, m = M[i] && M[i].hourly; if (!h || !m || !m.wave_height) return;
+      const by = new Map(m.time.map((t, k) => [t, m.wave_height[k]]));
+      h.wave_m = h.time.map(t => { const v = by.get(t); return v == null ? null : v; });
+      if (!h.wave_m.some(v => v != null)) delete h.wave_m; });
+  }
+
   // ---------- NOAA direct data (written by noaa/fetch_noaa.py on the host) ----------
   async function loadNoaa() {
     try { const r = await fetch("data/noaa.json?_=" + Math.floor(Date.now() / 60000), { cache: "no-store" }); if (!r.ok) throw new Error(r.status); return await r.json(); }
@@ -401,8 +422,9 @@
         ${chip("Low", Math.round(s.low) + "%", types.low || "", P.clouds)}
         ${chip(DIRW + " gap", Math.round((1 - ev.slotBlock) * 100) + "% open", ev.slotBlock < 0.25 ? "light gets in" : ev.slotBlock < 0.55 ? "partly blocked" : "mostly blocked", P.path)}
         ${chip("Air", hazeTxt, s.aod != null ? "AOD " + s.aod.toFixed(2) : "RH " + Math.round(ev.rhLow) + "%", P.aod)}
+        ${ev.sea ? `<div class="rc" id="pv-sea"><span>Water</span><b>—</b><small></small></div>` : `<div class="rc"><span>Water</span><b>None</b><small>land foreground</small></div>`}
       </div>
-      <div class="fine pv-fine">This is an illustrated preview generated from this spot's forecast, not a photo. Cloud cover by layer comes from NOAA HRRR (with the low-cloud gap along the ${EV} line), haze from NOAA GOES-19 AOD / CAMS, and the lighting follows the actual sun position. Drag the slider or hit Play to watch the colors change through ${RISE ? "blue hour, first color, sunrise and golden hour" : "golden hour, sunset, afterglow and blue hour"}. Weather is drawn only when the forecast calls for it during the ${EV} window: rain (slanted by the wind), ⚡ storm cell and lightning (odds ≥ 25%), whitecaps (wind ≥ 15 mph), fog and snow. Rainbows form opposite the sun — behind you — so when rainbow odds are ≥ 10% a 🌈 “behind you” panel appears during the forecast rainbow window.</div>
+      <div class="fine pv-fine">This is an illustrated preview generated from this spot's forecast, not a photo. Cloud cover by layer comes from NOAA HRRR (with the low-cloud gap along the ${EV} line), haze from NOAA GOES-19 AOD / CAMS, and the lighting follows the actual sun position. Drag the slider or hit Play to watch the colors change through ${RISE ? "blue hour, first color, sunrise and golden hour" : "golden hour, sunset, afterglow and blue hour"}. Weather is drawn only when the forecast calls for it during the ${EV} window: rain (slanted by the wind), ⚡ storm cell and lightning (odds ≥ 25%), fog and snow. The water surface follows the forecast wind, gusts and wave height minute by minute: glassy and mirror-reflective under ~3 mph, light ripples to ~7 mph, small wavelets and a glitter path to ~11 mph, choppy with scattered whitecaps from ~12 mph, rough with frequent whitecaps past ~16 mph, and whitecaps everywhere past ~22 mph — with every shade in between. Rainbows form opposite the sun — behind you — so when rainbow odds are ≥ 10% a 🌈 “behind you” panel appears during the forecast rainbow window.</div>
       ${noaaPanel(r)}`;
   }
 
@@ -466,6 +488,7 @@
       showPhotos(t);
       if (dragging && o.mode === "live") { clearTimeout(hqT); hqT = setTimeout(() => { dragging = false; queue(); }, 160); }
       $("#pv-time").textContent = fmtTime(t, r.tz);
+      { const se = $("#pv-sea"), W2 = ev.sea && Model.seaAt(ev, t); if (se && W2) { se.querySelector("b").textContent = W2.name; se.querySelector("small").textContent = `${Math.round(W2.wind)} mph · gust ${Math.round(W2.gust)}${W2.ft != null ? ` · ${W2.ft < 1 ? "<1" : Math.round(W2.ft)} ft` : ""}`; se.title = W2.txt; } }
       $("#pv-phase").textContent = phaseName(o.phase);
       $("#pv-elev").textContent = `sun ${o.elev >= 0 ? "+" : "−"}${Math.abs(o.elev).toFixed(1)}°`;
       const parts = [["high", ev.s.high, "Cirrus"], ["mid", ev.s.mid, "Mid cloud"], ["low", ev.s.low, "Low cloud"]].filter(x => x[1] >= 10).map(x => `${x[2]} ${word(o.lit[x[0]])}`);
@@ -644,8 +667,8 @@
   renderSatGallery("se", "GEOCOLOR");
 
   // boot
-  Promise.all([loadData(), loadNoaa()]).then(([d, N]) => {
-    state.noaa = N; applyNoaa(d, N); state.data = d;
+  Promise.all([loadData(), loadNoaa(), loadMarine()]).then(([d, N, MW]) => {
+    applyMarine(d, MW); state.noaa = N; applyNoaa(d, N); state.data = d;
     if (RISE && d.S[0] && d.S[0].daily.sunrise[0] + 3600 < Date.now() / 1000) state.day = 1;   // this morning's sunrise is over → show tomorrow
     update();
     $("#loading").classList.add("done");
