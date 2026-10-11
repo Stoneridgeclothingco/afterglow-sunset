@@ -42,8 +42,12 @@
   }
 
   async function loadData() {
-    const key = "afterglow-v5", cached = JSON.parse(localStorage.getItem(key) || "null");
-    if (cached && Date.now() - cached.at < 30 * 60 * 1000) return cached;
+    // Cache is keyed to the exact spot list: adding/reordering spots must never reuse old index-aligned arrays.
+    const sig = SPOTS.map(s => s.id).join("|");
+    Object.keys(localStorage).filter(k => k.startsWith("afterglow-v") && k !== "afterglow-v13").forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+    const key = "afterglow-v13";
+    let cached = null; try { cached = JSON.parse(localStorage.getItem(key) || "null"); } catch (e) {}
+    if (cached && cached.sig === sig && cached.S && cached.S.length === SPOTS.length && cached.W && cached.W.length === SPOTS.length * 3 && cached.E && cached.E.length === SPOTS.length && Date.now() - cached.at < 30 * 60 * 1000) return cached;
     // Primary: NOAA HRRR (0–48 h, 3 km) blended into NOAA GFS (days 3–7) — Open-Meteo "gfs_seamless" mirror of NOAA NOMADS output.
     // Fallback (clearly labelled): Open-Meteo best-match, which may use non-NOAA models.
     const get = models => Promise.all([
@@ -56,7 +60,7 @@
     // Air quality (aerosol optical depth, PM2.5) — optional; score falls back to visibility only
     let AQ = null;
     try { AQ = await fetchBatch(SPOTS, "aerosol_optical_depth,pm2_5,dust", null, "https://air-quality-api.open-meteo.com/v1/air-quality"); } catch (e) { console.warn("AQ unavailable", e); }
-    const d = { at: Date.now(), S, W, E, AQ, fcModel };
+    const d = { at: Date.now(), sig, S, W, E, AQ, fcModel };
     try { localStorage.setItem(key, JSON.stringify(d)); } catch (e) {}
     return d;
   }
