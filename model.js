@@ -1,0 +1,285 @@
+// Sunset quality / optics model. Pure functions, no DOM. All estimates are heuristics.
+(function (g) {
+  const RAD = Math.PI / 180, DEG = 180 / Math.PI;
+  const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+  // piecewise-linear interpolation through [[x,y],...]
+  function pw(x, pts) {
+    if (x <= pts[0][0]) return pts[0][1];
+    for (let i = 1; i < pts.length; i++) {
+      if (x <= pts[i][0]) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+        return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+      }
+    }
+    return pts[pts.length - 1][1];
+  }
+
+  // NOAA-style solar position. t = unix seconds. Returns {elev, az} in degrees (az from north, clockwise).
+  function sunPos(t, lat, lng) {
+    const jd = t / 86400 + 2440587.5, T = (jd - 2451545) / 36525;
+    const L0 = (280.46646 + T * (36000.76983 + T * 0.0003032)) % 360;
+    const M = 357.52911 + T * (35999.05029 - 0.0001537 * T);
+    const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T);
+    const C = Math.sin(M * RAD) * (1.914602 - T * (0.004817 + 0.000014 * T)) + Math.sin(2 * M * RAD) * (0.019993 - 0.000101 * T) + Math.sin(3 * M * RAD) * 0.000289;
+    const lam = L0 + C - 0.00569 - 0.00478 * Math.sin((125.04 - 1934.136 * T) * RAD);
+    const eps0 = 23 + (26 + (21.448 - T * (46.815 + T * (0.00059 - T * 0.001813))) / 60) / 60;
+    const eps = eps0 + 0.00256 * Math.cos((125.04 - 1934.136 * T) * RAD);
+    const decl = Math.asin(Math.sin(eps * RAD) * Math.sin(lam * RAD));
+    const y = Math.tan(eps * RAD / 2) ** 2;
+    const eqt = 4 * DEG * (y * Math.sin(2 * L0 * RAD) - 2 * e * Math.sin(M * RAD) + 4 * e * y * Math.sin(M * RAD) * Math.cos(2 * L0 * RAD) - 0.5 * y * y * Math.sin(4 * L0 * RAD) - 1.25 * e * e * Math.sin(2 * M * RAD));
+    const minutesUTC = ((t % 86400) + 86400) % 86400 / 60;
+    let tst = (minutesUTC + eqt + 4 * lng) % 1440; if (tst < 0) tst += 1440;
+    let ha = tst / 4 - 180;
+    const latR = lat * RAD, haR = ha * RAD;
+    const cosZ = Math.sin(latR) * Math.sin(decl) + Math.cos(latR) * Math.cos(decl) * Math.cos(haR);
+    const zen = Math.acos(clamp(cosZ, -1, 1));
+    let az = Math.atan2(Math.sin(haR), Math.cos(haR) * Math.sin(latR) - Math.tan(decl) * Math.cos(latR)) * DEG + 180;
+    return { elev: 90 - zen * DEG, az: (az + 360) % 360 };
+  }
+
+  // point at distance km along bearing deg
+  function offset(lat, lng, bearing, km) {
+    const R = 6371, d = km / R, b = bearing * RAD, p1 = lat * RAD, l1 = lng * RAD;
+    const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+    const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+    return { lat: +(p2 * DEG).toFixed(4), lng: +(l2 * DEG).toFixed(4) };
+  }
+
+  // linear interpolation of an hourly series at unix time t
+  function at(h, key, t) {
+    const T = h.time, v = h[key]; if (!v) return null;
+    let i = Math.floor((t - T[0]) / 3600);
+    if (i < 0) i = 0; if (i >= T.length - 1) return v[T.length - 1];
+    const f = (t - T[i]) / 3600, a = v[i], b = v[i + 1];
+    if (a == null) return b; if (b == null) return a;
+    return a + (b - a) * f;
+  }
+  const atCode = (h, t) => { const T = h.time; const i = clamp(Math.round((t - T[0]) / 3600), 0, T.length - 1); return h.weather_code ? h.weather_code[i] : null; };
+  const sumRange = (h, key, t0, t1) => { let s = 0; for (let i = 0; i < h.time.length; i++) if (h.time[i] >= t0 && h.time[i] <= t1) s += h[key][i] || 0; return s; };
+  const isShowery = c => (c >= 80 && c <= 82) || c >= 95;
+  const isRain = c => (c >= 51 && c <= 67);
+
+  function cloudTypes(s) {
+    const out = [];
+    if (s.high >= 5) out.push({ level: "High (≈20–40k ft)", type: s.high < 40 ? "Cirrus — thin, scattered wisps" : s.high < 75 ? "Cirrus / cirrocumulus" : "Cirrostratus — high ice sheet", cover: s.high });
+    if (s.mid >= 5) out.push({ level: "Mid (≈7–20k ft)", type: s.mid < 50 ? "Altocumulus — patchy mackerel sky" : "Altostratus — grey mid-level layer", cover: s.mid });
+    if (s.low >= 5) {
+      let ty;
+      if (isShowery(s.code) && s.code >= 95) ty = "Cumulonimbus — thunderstorms";
+      else if (s.cape > 800 && s.low > 15) ty = "Towering cumulus";
+      else if (s.vis != null && s.vis < 1500 && s.low > 70) ty = "Stratus / fog";
+      else if (s.low > 70) ty = "Stratus / stratocumulus deck";
+      else if (s.cape > 150) ty = "Fair-weather cumulus";
+      else ty = "Stratocumulus";
+      out.push({ level: "Low (< 6.5k ft)", type: ty, cover: s.low });
+    }
+    if (!out.length) out.push({ level: "All levels", type: "Clear sky", cover: 0 });
+    return out;
+  }
+
+  // Find time (unix) when sun reaches elevation `el` after t0 (searching forward, 1-min steps)
+  function timeAtElev(t0, lat, lng, el, maxMin = 90) {
+    for (let m = 0; m <= maxMin; m++) { if (sunPos(t0 + m * 60, lat, lng).elev <= el) return t0 + m * 60; }
+    return null;
+  }
+  function timeBeforeAtElev(t0, lat, lng, el, maxMin = 240) {
+    for (let m = 0; m <= maxMin; m++) { if (sunPos(t0 - m * 60, lat, lng).elev >= el) return t0 - m * 60; }
+    return null;
+  }
+  // Moon age in days (0 = new, ~14.77 = full)
+  const moonAge = t => { const syn = 29.530588853, ref = 947182440; return (((t - ref) / 86400) % syn + syn) % syn; };
+  const angDiff = (a, b) => { let d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; };
+
+  // Evaluate one spot for one day (Sunset Metric Bible v1 §0–§13).
+  // S = spot forecast, Wl = [W40, W120, W200] forecasts along the sunset azimuth, E = antisolar point (~12 km), AQ = air quality
+  function evaluate(sp, S, Wl, E, di, AQ) {
+    const tSet = S.daily.sunset[di], h = S.hourly, e = E.hourly, lat = sp.lat, lng = sp.lng;
+    const W = Wl[0].hourly; // nearest western point (kept for legacy fields)
+    const path = Wl.map((w, k) => ({ km: [40, 120, 200][k], low: at(w.hourly, "cloud_cover_low", tSet), mid: at(w.hourly, "cloud_cover_mid", tSet), high: at(w.hourly, "cloud_cover_high", tSet), precip: at(w.hourly, "precipitation", tSet) }));
+    const aqh = AQ && AQ.hourly;
+    const s = {
+      total: at(h, "cloud_cover", tSet), low: at(h, "cloud_cover_low", tSet), mid: at(h, "cloud_cover_mid", tSet), high: at(h, "cloud_cover_high", tSet),
+      rh: at(h, "relative_humidity_2m", tSet), rh850: at(h, "relative_humidity_850hPa", tSet), rh500: at(h, "relative_humidity_500hPa", tSet), rh300: at(h, "relative_humidity_300hPa", tSet),
+      temp: at(h, "temperature_2m", tSet), dew: at(h, "dew_point_2m", tSet),
+      vis: at(h, "visibility", tSet), wind: at(h, "wind_speed_10m", tSet), gust: at(h, "wind_gusts_10m", tSet), wdir: at(h, "wind_direction_10m", tSet),
+      precip: at(h, "precipitation", tSet), pprob: at(h, "precipitation_probability", tSet), cape: at(h, "cape", tSet), code: atCode(h, tSet),
+      pres: at(h, "pressure_msl", tSet),
+      wLow: path[0].low, wMid: path[0].mid, wHigh: path[0].high, wPrecip: path[0].precip,
+      eLow: at(e, "cloud_cover_low", tSet), eMid: at(e, "cloud_cover_mid", tSet),
+      aod: aqh ? at(aqh, "aerosol_optical_depth", tSet) : null, pm25: aqh ? at(aqh, "pm2_5", tSet) : null, dust: aqh ? at(aqh, "dust", tSet) : null,
+    };
+    const priorRain = sumRange(h, "precipitation", tSet - 24 * 3600, tSet - 3600);
+    const az = sunPos(tSet, lat, lng).az;
+    const hi = s.high / 100, md = s.mid / 100, lo = s.low / 100;
+
+    // ---- §1 timing ----
+    const golden = timeBeforeAtElev(tSet, lat, lng, 6);
+    const civilEnd = timeAtElev(tSet, lat, lng, -6, 120);
+    const dom = hi >= 0.2 ? "high" : md >= 0.2 ? "mid" : lo >= 0.2 ? "low" : "clear";
+    const hKm = { high: 9, mid: 4, low: 1, clear: 0 }[dom];
+    const peakMin = { high: 12, mid: 6, low: 2, clear: 5 }[dom];
+    const depress = hKm ? Math.sqrt(2 * hKm / 6371) * DEG + 0.5 : 6; // §1.4 depression angle at which cloud stops being lit
+    const glowEnd = timeAtElev(tSet, lat, lng, -depress, 120) || tSet + 20 * 60;
+    const timing = { golden, sunset: tSet, peak: tSet + peakMin * 60, glowEnd, civilEnd, dom, twilightMin: civilEnd ? Math.round((civilEnd - tSet) / 60) : null };
+
+    // ---- §2.4 western clear slot (low + ½ mid along the sun azimuth, 40/120/200 km) ----
+    const blockAt = p => clamp((p.low + 0.5 * p.mid) / 100);
+    const slotBlock = 0.45 * blockAt(path[0]) + 0.35 * blockAt(path[1]) + 0.2 * blockAt(path[2]);
+    const pathLow = 0.45 * path[0].low + 0.35 * path[1].low + 0.2 * path[2].low;
+    const slotQ = pw(slotBlock, [[0, 1], [0.3, 0.85], [0.5, 0.5], [0.7, 0.15], [0.9, 0]]);
+
+    // ---- §2.1/2.2 screen quality ----
+    const highQ = pw(hi, [[0, 0], [0.1, 0.3], [0.2, 0.85], [0.3, 1], [0.7, 1], [0.9, 0.6], [1, 0.45]]);
+    const midQ = pw(md, [[0, 0], [0.1, 0.35], [0.2, 1], [0.6, 1], [0.85, 0.45], [1, 0.25]]);
+    let screen = clamp(Math.max(highQ, 0.92 * midQ) + 0.12 * Math.min(highQ, midQ));
+    if (hi > 0.85 && md > 0.6) screen *= 0.75; // thick featureless deck (§2.7)
+    const canvasCover = 1 - (1 - hi) * (1 - md);
+    // trailing-edge contrast (§2.5): overhead screen counts only as much as light gets in
+    const screenEff = screen * (0.35 + 0.65 * slotQ);
+
+    // ---- §3/§4 low-level cleanliness ----
+    const aodQ = s.aod != null ? pw(s.aod, [[0, 1], [0.1, 0.95], [0.2, 0.78], [0.4, 0.45], [0.6, 0.2], [1, 0.05]]) : null;
+    const pmQ = s.pm25 != null ? pw(s.pm25, [[0, 1], [10, 0.95], [20, 0.7], [35, 0.4], [60, 0.1]]) : null;
+    const visQ = s.vis != null ? pw(s.vis / 1609, [[0, 0], [3, 0.2], [5, 0.4], [10, 0.85], [15, 1]]) : 0.8;
+    const rhLow = s.rh850 != null ? 0.6 * s.rh + 0.4 * s.rh850 : s.rh;
+    const rhQ = pw(rhLow, [[0, 1], [60, 1], [70, 0.8], [80, 0.55], [90, 0.25], [100, 0.1]]);
+    const clean = (aodQ ?? 0.8) * 0.35 + (pmQ ?? 0.8) * 0.2 + visQ * 0.2 + rhQ * 0.25;
+    const dewDep = s.temp - s.dew;
+
+    // ---- §5 synoptic: front passage / pressure tendency / clearing trend ----
+    const p6 = at(h, "pressure_msl", tSet - 6 * 3600), p24 = at(h, "pressure_msl", tSet - 24 * 3600), d24 = at(h, "dew_point_2m", tSet - 24 * 3600);
+    const dP6 = s.pres != null && p6 != null ? s.pres - p6 : 0, dP24 = s.pres != null && p24 != null ? s.pres - p24 : 0, dDew = d24 != null ? s.dew - d24 : 0;
+    const wLowPrev = at(Wl[0].hourly, "cloud_cover_low", tSet - 3 * 3600);
+    const clearingTrend = wLowPrev != null ? (wLowPrev - s.wLow) / 100 : 0;
+    // find wind-shift/dew drop timing in last 36 h as a frontal-passage proxy
+    let fropaH = null;
+    for (let k = 1; k <= 36; k++) { const a = at(h, "dew_point_2m", tSet - k * 3600), b = at(h, "dew_point_2m", tSet - (k + 6) * 3600); if (a != null && b != null && b - a >= 6) { fropaH = k + 3; break; } }
+    const syn = clamp(0.35 * pw(dP6, [[-3, 0], [0, 0.3], [1, 0.7], [3, 1]]) + 0.3 * pw(-dDew, [[-2, 0], [0, 0.2], [4, 0.7], [8, 1]]) + 0.2 * (fropaH != null && fropaH >= 6 && fropaH <= 36 ? 1 : 0) + 0.15 * clamp(0.3 + clearingTrend * 2));
+    const front = fropaH != null && fropaH <= 36 && dP24 > 1.5;
+
+    // ---- §2.3 low cloud (overhead) ----
+    const lowQ = 1 - pw(lo, [[0, 0], [0.2, 0], [0.5, 0.5], [0.6, 0.8], [0.8, 1]]);
+    // ---- §4.2 upper moisture ----
+    const upQ = s.rh300 != null ? pw(s.rh300, [[0, 0.1], [30, 0.3], [50, 0.8], [70, 1], [90, 1], [100, 0.7]]) : hi > 0.1 ? 0.8 : 0.3;
+    // ---- §3.3 elevated smoke/aerosol: AOD high but surface PM low ⇒ aerosol aloft (bonus); both high ⇒ penalty ----
+    let smokeQ = 0.5, smokeNote = null;
+    if (s.aod != null && s.pm25 != null) {
+      if (s.aod > 0.2 && s.aod < 0.6 && s.pm25 < 12) { smokeQ = 0.85; smokeNote = "Aerosol appears to be aloft (AOD up, surface PM2.5 low) — can deepen reds/oranges."; }
+      else if (s.aod > 0.5 && s.pm25 > 25) { smokeQ = 0.1; smokeNote = "Dense haze/smoke through the column — expect a dim, muddy sunset."; }
+    }
+
+    const comp = [
+      { k: "Western clear slot", w: 25, q: slotQ },
+      { k: "High/mid cloud screen", w: 25, q: screenEff },
+      { k: "Clean low-level air", w: 20, q: clean },
+      { k: "Post-front / pressure", w: 10, q: syn },
+      { k: "Low cloud (overhead)", w: 10, q: lowQ },
+      { k: "Moisture aloft", w: 5, q: upQ },
+      { k: "Smoke / aerosol aloft", w: 5, q: smokeQ },
+    ];
+    let sky = comp.reduce((a, c) => a + c.w * c.q, 0);
+    const month = new Date(tSet * 1000).getUTCMonth();
+    const season = [9, 10, 11, 0, 1].includes(month) ? 1.04 : [5, 6, 7].includes(month) ? 0.95 : 1; // §10.1 weak prior
+    sky *= season;
+
+    // ---- §0 gates ----
+    const gates = [];
+    if (hi + md < 0.1) { sky = Math.min(sky, 55); gates.push("Clear sky: capped at 55 — pretty gradient, nothing to paint."); }
+    if (s.vis != null && s.vis < 4830) { sky = Math.min(sky, 45); gates.push("Visibility under ~3 mi: capped at Fair."); }
+    if (pathLow >= 90 || Math.max(path[0].low, path[1].low) >= 95) { sky = Math.min(sky, 20); gates.push("Low overcast along the sunset path (out to ~200 km): light can't reach the clouds — Poor."); }
+    if ((s.precip || 0) >= 0.2 || [45, 48].includes(s.code)) { sky = Math.min(sky, 20); gates.push(`${[45, 48].includes(s.code) ? "Fog" : "Rain"} at the spot at sunset — Poor for color (rainbow scored separately).`); }
+    if (s.total >= 95 && slotBlock >= 0.85) { sky = Math.min(sky, 20); gates.push("Full overcast with no western gap — Poor."); }
+    sky = Math.round(clamp(sky, 0, 100));
+
+    // ---- §9 site fit ----
+    const inArc = az >= sp.arc[0] && az <= sp.arc[1];
+    const off = inArc ? 0 : Math.min(angDiff(az, sp.arc[0]), angDiff(az, sp.arc[1]));
+    const alignQ = inArc ? 1 : off <= 15 ? 0.65 : off <= 35 ? 0.35 : 0.15;
+    const obstQ = pw(sp.obst, [[0, 1], [1, 0.9], [3, 0.7], [5, 0.4]]);
+    const waterQ = sp.water ? 1 : 0.6;
+    const mph = s.wind;
+    const surface = !sp.water ? "No water foreground" : mph < 5 ? "Calm — mirror reflections likely" : mph < 15 ? "Light breeze — glitter path on the water" : "Choppy — reflections broken up";
+    const windQ = !sp.water ? 0.8 : mph < 5 ? 1 : mph < 15 ? 0.9 : 0.7;
+    const site = Math.round(100 * (0.45 * alignQ + 0.25 * obstQ + 0.2 * waterQ + 0.1 * windQ));
+    const score = Math.round(sky * (0.78 + 0.22 * site / 100));
+
+    // ---- reasons ----
+    const R = [];
+    if (slotBlock < 0.25) R.push("Western light path is open — sunlight can reach the clouds.");
+    else if (slotBlock < 0.55) R.push(`Partial western gap (${Math.round(slotBlock * 100)}% blocked along the sunset line).`);
+    else R.push(`Western light path mostly blocked (${Math.round(slotBlock * 100)}%) by low/mid cloud — biggest risk.`);
+    if (hi + md < 0.1) R.push("Almost no high or mid cloud — clean gradient but no canvas.");
+    else if (screen > 0.75) R.push(`Good screen: ${Math.round(s.high)}% high, ${Math.round(s.mid)}% mid cloud${dom === "high" ? " (cirrus-level, glows longest)" : ""}.`);
+    else if (hi > 0.85 && md > 0.6) R.push("Thick, layered deck overhead — tends to go grey unless the sun slips under it.");
+    else R.push(`Thin canvas: ${Math.round(s.high)}% high, ${Math.round(s.mid)}% mid.`);
+    if (lo > 0.5) R.push(`Low cloud overhead (${Math.round(s.low)}%) will hide the upper layers.`);
+    if (clean < 0.6) R.push(`Hazy/humid lower air (RH ${Math.round(rhLow)}%${s.aod != null ? `, AOD ${s.aod.toFixed(2)}` : ""}) mutes color.`);
+    else if (clean > 0.85) R.push("Clean, dry low-level air — crisp, saturated color.");
+    if (front) R.push(`Post-frontal air: drier air arrived ~${fropaH} h ago and pressure is up ${dP24.toFixed(1)} hPa in 24 h — often the week's best setup.`);
+    else if (dP6 > 1) R.push(`Pressure rising (+${dP6.toFixed(1)} hPa/6h) — clearing tendency.`);
+    if (smokeNote) R.push(smokeNote);
+    if (!inArc) R.push(`Tonight's sunset azimuth (${Math.round(az)}°) is ${Math.round(off)}° outside this spot's open view — seasonal mismatch.`);
+
+    // ---- §6/§7/§8 wow badges ----
+    let dog = { p: 0, t: null }, bow = { p: 0, t: null }, halo = { p: 0 };
+    for (let k = 0; k <= 16; k++) {
+      const t = tSet - 4 * 3600 + k * 900;
+      const pos = sunPos(t, lat, lng); if (pos.elev < 0.3) continue;
+      const H = at(h, "cloud_cover_high", t) / 100, Hw = at(Wl[0].hourly, "cloud_cover_high", t) / 100;
+      const L = at(h, "cloud_cover_low", t) / 100, M = at(h, "cloud_cover_mid", t) / 100;
+      const WL = at(Wl[0].hourly, "cloud_cover_low", t) / 100, WM = at(Wl[0].hourly, "cloud_cover_mid", t) / 100;
+      const pr = at(h, "precipitation", t) || 0;
+      const sunVis = clamp((1 - Math.max(WL, L * 0.6)) * (1 - 0.85 * Math.max(WM, M * 0.5)));
+      const cir = (H + Hw) / 2;
+      const thin = pw(cir, [[0, 0], [0.08, 0.15], [0.25, 0.85], [0.6, 1], [0.85, 0.6], [1, 0.35]]);
+      // §7.1 sun dogs: sun < 30° (best < 15°), thin cirrus/Cs near the sun, sun disk visible
+      const elevF = pos.elev < 15 ? 1 : pos.elev < 30 ? 0.55 : 0;
+      const pd = 0.5 * thin * sunVis * elevF * (pr > 0.2 ? 0.3 : 1);
+      if (pd > dog.p) dog = { p: pd, t, elev: pos.elev };
+      // §7.2 22° halo (partial arcs near sunset)
+      const ph = 0.4 * pw(cir, [[0, 0], [0.2, 0.3], [0.5, 0.9], [0.9, 1], [1, 0.8]]) * sunVis * (pos.elev < 40 ? 1 : 0.6);
+      if (ph > halo.p) halo = { p: ph, t };
+      // §6 rainbows: sun < 42°, rain to the east 1–30 km, clear west (<30% low/mid), viewer dry
+      if (pos.elev < 42) {
+        const ep = at(e, "precipitation", t) || 0, epp = (at(e, "precipitation_probability", t) || 0) / 100;
+        const ec = atCode(e, t), sc = atCode(h, t);
+        const rainEast = clamp(Math.max(ep / 1.0, epp * 0.75));
+        const conv = isShowery(ec) || isShowery(sc) ? 1 : isRain(ec) || isRain(sc) ? 0.55 : 0.4;
+        const clearW = pw(Math.max(WL, WM * 0.8), [[0, 1], [0.3, 0.8], [0.6, 0.25], [0.9, 0]]);
+        const dry = pr > 1 ? 0.2 : pr > 0.3 ? 0.6 : 1;
+        const pb = 0.6 * rainEast * conv * clearW * dry;
+        if (pb > bow.p) bow = { p: pb, t, elev: pos.elev, red: t >= tSet - 15 * 60 };
+      }
+    }
+    const wLoBlock = slotBlock;
+    const pct = x => Math.round(clamp(x) * 100);
+    const badges = [
+      { id: "dog", name: "Sun dogs", p: pct(dog.p), t: dog.t, icon: "◉", why: dog.p >= 0.1 ? "Thin cirrus with a visible low sun — look ~22° left and right of the sun." : "Needs thin cirrus/cirrostratus with the sun visible below ~25°." },
+      { id: "halo", name: "22° halo", p: pct(halo.p), t: halo.t, icon: "◯", why: "Ring 22° around the sun from cirrostratus; near sunset only partial arcs show." },
+      { id: "bow", name: bow.red ? "Red rainbow" : "Rainbow", p: pct(bow.p), t: bow.t, icon: "🌈", why: bow.p >= 0.1 ? `Showers east while the sun shines from the west — look east (antisolar point).${bow.red ? " Near sunset the bow turns red/orange." : ""}` : "Needs showers to the east, a clear western sky, and a dry viewer." },
+      { id: "pillar", name: "Sun pillar", p: pct(0.4 * pw(hi, [[0, 0], [0.15, 0.4], [0.4, 1], [0.8, 0.7], [1, 0.4]]) * (1 - wLoBlock) * (s.temp < 40 ? 1.3 : 1)), t: tSet + 3 * 60, icon: "┃", why: "Vertical light column from plate crystals as the sun touches/just passes the horizon." },
+      { id: "rays", name: "Crepuscular rays", p: pct(0.7 * pw((path[0].low + path[0].mid * 0.5) / 100, [[0, 0], [0.2, 0.4], [0.35, 1], [0.65, 1], [0.85, 0.2]]) * (s.aod != null ? pw(s.aod, [[0, 0.5], [0.1, 1], [0.3, 1], [0.6, 0.5]]) : 0.8)), t: tSet - 10 * 60, icon: "☀", why: "Broken cloud on the western horizon plus a little haze casts visible shafts." },
+      { id: "venus", name: "Belt of Venus", p: pct(0.8 * (1 - clamp(((s.eLow || 0) + (s.eMid || 0) * 0.6) / 100)) * clean * (1 - hi * 0.6)), t: tSet + 10 * 60, icon: "▬", why: "Pink band above Earth's blue shadow in the EAST, ~5–20 min after sunset. Needs a clear eastern sky." },
+      { id: "flash", name: "Green flash", p: pct(sp.water && sp.obst <= 0.5 && inArc ? 0.35 * (1 - clamp(slotBlock * 3)) * (aodQ ?? 0.7) * (1 - lo) : 0), t: tSet, icon: "●", why: "Needs a flat water horizon, clean air and zero cloud at the horizon. Watch the very last sliver of sun." },
+    ];
+    const age = moonAge(tSet);
+    if (Math.abs(age - 14.77) <= 1.6) badges.push({ id: "moon", name: "Full moon rise", p: 80, t: tSet, icon: "🌕", why: `Moon ${age < 14.77 ? "rises shortly before" : "rises shortly after"} sunset, opposite the sun.` });
+    else if (age >= 1.2 && age <= 4.5) badges.push({ id: "moon", name: "Crescent moon", p: 60, t: tSet + 20 * 60, icon: "🌒", why: "Thin crescent low in the west in the afterglow." });
+
+    return { tSet, score, sky, site, s, path, priorRain, reasons: R, gates, comp, badges, dog: { p: pct(dog.p), t: dog.t }, bow: { p: pct(bow.p), t: bow.t },
+      clouds: cloudTypes(s), sunsetAz: az, canvasCover, slotBlock, clean, rhLow, dewDep, dP6, dP24, dDew, fropaH, front, timing,
+      siteInfo: { inArc, off, alignQ, obst: sp.obst, water: sp.water, surface, arc: sp.arc }, season, screen };
+  }
+
+
+  function label(score) {
+    if (score >= 85) return { t: "Epic", c: "#ff4f9a" };
+    if (score >= 70) return { t: "Great", c: "#ff7a3d" };
+    if (score >= 50) return { t: "Good", c: "#ffb347" };
+    if (score >= 30) return { t: "Fair", c: "#c9a46a" };
+    return { t: "Poor", c: "#6f7590" };
+  }
+  const likely = p => p >= 40 ? "High" : p >= 22 ? "Moderate" : p >= 10 ? "Low" : "Unlikely";
+
+  g.Model = { sunPos, offset, evaluate, label, likely, clamp, timeAtElev };
+})(window);
